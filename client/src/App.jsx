@@ -21,19 +21,19 @@ const nav = [
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-neutral-50">
-      <header className="bg-white border-b border-neutral-200 px-6 py-4 flex items-center gap-8 shadow-sm">
-        <span className="flex items-center gap-1.5">
+      <header className="bg-white border-b border-neutral-200 px-6 py-4 flex items-center gap-6 shadow-sm">
+        <span className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
           <img src="/logo-horizontal.png" alt="alis" className="h-7 w-auto" />
           <span className="font-bold text-xl text-accent-500">product hub</span>
         </span>
-        <nav className="flex gap-8">
+        <nav className="flex gap-6 min-w-0">
           {nav.map(({ to, label }) => (
             <NavLink
               key={to}
               to={to}
               end
               className={({ isActive }) =>
-                `text-sm font-medium transition-colors ${
+                `text-sm font-medium transition-colors whitespace-nowrap ${
                   isActive
                     ? 'text-primary-600 border-b-2 border-accent-500 pb-2'
                     : 'text-neutral-600 hover:text-primary-600'

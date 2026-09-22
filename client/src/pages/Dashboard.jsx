@@ -12,10 +12,20 @@ function slugify(title) {
 const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
-  { category: 'Data', items: ['Accounts', 'Active Requests'] },
+  { category: 'Highlighted', items: ['Top 3 Enhancements', 'Escalations'] },
+  { category: 'Everything', items: ['Accounts', 'Active Requests'] },
 ];
 
-function SectionCard({ title, description, action, children }) {
+// Same label alis-hub's ticket pipelines use for a ticket staged as one of
+// an account's Top 3 Enhancement asks (see hubspotRequests.js) — a stage,
+// not a category, so it's pulled from `stage`, not `category`.
+const TOP_3_STAGE = 'Top 3 Enhancements';
+// hubspotRequests.js's CATEGORY_2_0_LABELS maps the portal's "ALIS Bug"
+// category_2_0 value to this label — the closest thing to a structured
+// "this is an escalation" flag the data has today.
+const ESCALATION_CATEGORY = 'ALIS Escalation';
+
+function SectionCard({ title, description, action, accent, children }) {
   const ref = useRef(null);
   const sectionId = slugify(title);
 
@@ -29,7 +39,11 @@ function SectionCard({ title, description, action, children }) {
   }, [sectionId]);
 
   return (
-    <div id={sectionId} ref={ref} className="card mb-8 scroll-mt-4">
+    <div
+      id={sectionId}
+      ref={ref}
+      className={`card mb-8 scroll-mt-4 ${accent ? 'border-l-4 border-l-accent-500' : ''}`}
+    >
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-primary-900">{title}</h2>
@@ -71,10 +85,10 @@ function QuickJumpNav({ sections }) {
   );
 }
 
-function StatTile({ label, value, sub }) {
+function StatTile({ label, value, sub, accent }) {
   return (
-    <div className="card-sm bg-white border border-neutral-200 rounded-lg p-4">
-      <div className="text-2xl font-bold text-primary-900">{value}</div>
+    <div className={`bg-white border rounded-lg p-4 ${accent ? 'border-accent-300' : 'border-neutral-200'}`}>
+      <div className={`text-2xl font-bold ${accent ? 'text-accent-600' : 'text-primary-900'}`}>{value}</div>
       <div className="text-xs text-neutral-500 mt-1">{label}</div>
       {sub && <div className="text-[11px] text-neutral-400 mt-0.5">{sub}</div>}
     </div>
@@ -84,6 +98,75 @@ function StatTile({ label, value, sub }) {
 function usd(cents) {
   if (cents == null) return '—';
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+const REQUEST_COLUMNS = 8;
+
+/** One ticket row, click-to-expand into its full detail — category, pipeline, both dates, ticket id, and the HubSpot link, none of which fit in the summary row. */
+function RequestRow({ r, expanded, onToggle }) {
+  return (
+    <>
+      <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
+        <td>{r.companyName || '—'}</td>
+        <td>{r.tier ?? '—'}</td>
+        <td>{usd(r.arrCents)}</td>
+        <td className="max-w-[260px] truncate" title={r.subject}>{r.subject}</td>
+        <td>{r.stage}</td>
+        <td>{r.priority || '—'}</td>
+        <td>{r.ageDays != null ? `${r.ageDays}d` : '—'}</td>
+        <td className="text-center text-neutral-400">{expanded ? '▲' : '▼'}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={REQUEST_COLUMNS} className="bg-neutral-50">
+            <div className="py-3 px-2 text-sm">
+              <p className="font-medium text-primary-900 mb-2">{r.subject}</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5 text-xs text-neutral-600">
+                <div><span className="text-neutral-400">Category:</span> {r.category || '—'}</div>
+                <div><span className="text-neutral-400">Pipeline:</span> {r.pipeline}</div>
+                <div><span className="text-neutral-400">Ticket ID:</span> {r.ticketId}</div>
+                <div><span className="text-neutral-400">Created:</span> {r.createdAt ? r.createdAt.slice(0, 10) : '—'}</div>
+                <div><span className="text-neutral-400">Last modified:</span> {r.lastModifiedAt ? r.lastModifiedAt.slice(0, 10) : '—'}</div>
+                {r.url && <div><a href={r.url} target="_blank" rel="noreferrer">Open in HubSpot &rarr;</a></div>}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Shared table body for every request list on this page — Top 3 Enhancements, Escalations, and the full Active Requests list all render through this so the expand behavior stays identical. */
+function RequestsTable({ requests, emptyLabel }) {
+  const [expandedId, setExpandedId] = useState(null);
+
+  if (requests.length === 0) {
+    return <p className="text-sm text-neutral-500 py-4">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Company</th><th>Tier</th><th>ARR</th><th>Subject</th>
+            <th>Stage</th><th>Priority</th><th>Age</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map((r) => (
+            <RequestRow
+              key={r.ticketId}
+              r={r}
+              expanded={expandedId === r.ticketId}
+              onToggle={() => setExpandedId(expandedId === r.ticketId ? null : r.ticketId)}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -137,8 +220,21 @@ export default function Dashboard() {
     });
   }, [data, requestSearch, stageFilter]);
 
+  const top3Enhancements = useMemo(
+    () => (data ? data.requests.filter((r) => r.stage === TOP_3_STAGE) : []),
+    [data]
+  );
+  const escalations = useMemo(
+    () => (data ? data.requests.filter((r) => r.category === ESCALATION_CATEGORY) : []),
+    [data]
+  );
+
   const totalArrCents = useMemo(
     () => (data ? data.companies.reduce((sum, c) => sum + (c.arrCents || 0), 0) : 0),
+    [data]
+  );
+  const openTickets = useMemo(
+    () => (data ? data.requests.filter((r) => r.stage === 'Client Submitted' || r.stage === 'In Progress').length : 0),
     [data]
   );
   const staleRequests = useMemo(
@@ -175,13 +271,31 @@ export default function Dashboard() {
       {data && (
         <>
           <SectionCard title="Overview" description={`As of ${new Date(data.generatedAt).toLocaleString()}`}>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
               <StatTile label="Accounts" value={data.companies.length} />
               <StatTile label="Portfolio ARR" value={usd(totalArrCents)} />
-              <StatTile label="Active Requests" value={data.requests.length} sub="last 120 days" />
-              <StatTile label="Aged 90+ days" value={staleRequests} sub="of active requests" />
+              <StatTile label="Open Tickets" value={openTickets} sub="Client Submitted + In Progress" />
+              <StatTile label="Enhancement Tickets" value={data.requests.filter((r) => (r.category || '').toLowerCase().includes('enhancement') || (r.category || '').toUpperCase() === 'FEATURE_REQUEST').length} sub="by category" />
+              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent />
+              <StatTile label="Escalations" value={escalations.length} accent />
             </div>
             <QuickJumpNav sections={OVERVIEW_SECTIONS} />
+          </SectionCard>
+
+          <SectionCard
+            title="Top 3 Enhancements"
+            description="Every ticket staged as one of an account's Top 3 Enhancement asks — the requests carrying the most explicit account-level priority signal available."
+            accent
+          >
+            <RequestsTable requests={top3Enhancements} emptyLabel="No tickets currently staged as Top 3 Enhancements." />
+          </SectionCard>
+
+          <SectionCard
+            title="Escalations"
+            description="Every ticket categorized as an ALIS Escalation, portfolio-wide."
+            accent
+          >
+            <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
           </SectionCard>
 
           <SectionCard title="Accounts" description="Every Home Office account, tier, and ARR — search to narrow.">
@@ -212,7 +326,7 @@ export default function Dashboard() {
 
           <SectionCard
             title="Active Requests"
-            description="Tickets modified in the last 120 days in an active stage, joined to account ARR/tier. No scoring — raw columns to sort/filter/weight however your team already does."
+            description="Tickets modified in the last 120 days in an active stage, joined to account ARR/tier. Click a row for full detail. No scoring — raw columns to sort/filter/weight however your team already does."
           >
             <div className="flex gap-3 mb-4 flex-wrap">
               <input
@@ -226,30 +340,7 @@ export default function Dashboard() {
                 {stages.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div className="overflow-x-auto">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Company</th><th>Tier</th><th>ARR</th><th>Subject</th>
-                    <th>Stage</th><th>Priority</th><th>Age</th><th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRequests.slice(0, 50).map((r) => (
-                    <tr key={r.ticketId}>
-                      <td>{r.companyName || '—'}</td>
-                      <td>{r.tier ?? '—'}</td>
-                      <td>{usd(r.arrCents)}</td>
-                      <td className="max-w-[280px] truncate" title={r.subject}>{r.subject}</td>
-                      <td>{r.stage}</td>
-                      <td>{r.priority || '—'}</td>
-                      <td>{r.ageDays != null ? `${r.ageDays}d` : '—'}</td>
-                      <td>{r.url && <a href={r.url} target="_blank" rel="noreferrer">Open</a>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RequestsTable requests={filteredRequests.slice(0, 50)} emptyLabel="No requests match that search." />
             {filteredRequests.length > 50 && (
               <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredRequests.length} — narrow your search, or export for the full list.</p>
             )}
