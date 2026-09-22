@@ -13,7 +13,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
   { category: 'Highlighted', items: ['Top 3 Enhancements', 'Escalations'] },
-  { category: 'Everything', items: ['Accounts', 'Active Requests'] },
+  { category: 'Everything', items: ['Accounts', 'Open Tickets', 'Enhancement Tickets', 'Active Requests'] },
 ];
 
 // Same label alis-hub's ticket pipelines use for a ticket staged as one of
@@ -94,13 +94,23 @@ function QuickJumpNav({ sections }) {
   );
 }
 
-function StatTile({ label, value, sub, accent }) {
+/** A KPI tile that jumps to its own section when a target is given — same "hover grows, feels clickable" convention as alis-hub's StatCard jumpTo tiles, just scoped to this one component instead of every .card. */
+function StatTile({ label, value, sub, accent, jumpTo }) {
+  const clickable = Boolean(jumpTo);
   return (
-    <div className={`rounded-xl p-6 border ${accent ? 'bg-accent-50 border-accent-300' : 'bg-white border-neutral-200'}`}>
+    <button
+      type="button"
+      onClick={clickable ? () => window.dispatchEvent(new CustomEvent(JUMP_EVENT, { detail: { id: slugify(jumpTo) } })) : undefined}
+      disabled={!clickable}
+      title={clickable ? `Jump to ${jumpTo}` : undefined}
+      className={`text-left rounded-xl p-6 border w-full transition-all duration-200 ${
+        accent ? 'bg-accent-50 border-accent-300' : 'bg-white border-neutral-200'
+      } ${clickable ? 'cursor-pointer hover:scale-[1.03] hover:shadow-lg hover:border-accent-400' : 'cursor-default'}`}
+    >
       <div className={`text-4xl font-bold leading-none tabular-nums ${accent ? 'text-accent-600' : 'text-primary-900'}`}>{value}</div>
       <div className={`text-sm font-medium mt-2.5 ${accent ? 'text-accent-700' : 'text-neutral-600'}`}>{label}</div>
       {sub && <div className="text-xs text-neutral-400 mt-1">{sub}</div>}
-    </div>
+    </button>
   );
 }
 
@@ -276,8 +286,12 @@ export default function Dashboard() {
     () => (data ? data.companies.reduce((sum, c) => sum + (c.arrCents || 0), 0) : 0),
     [data]
   );
-  const openTickets = useMemo(
-    () => (data ? data.requests.filter((r) => r.stage === 'Client Submitted' || r.stage === 'In Progress').length : 0),
+  const openTicketRequests = useMemo(
+    () => (data ? data.requests.filter((r) => r.stage === 'Client Submitted' || r.stage === 'In Progress') : []),
+    [data]
+  );
+  const enhancementRequests = useMemo(
+    () => (data ? data.requests.filter((r) => (r.category || '').toLowerCase().includes('enhancement') || (r.category || '').toUpperCase() === 'FEATURE_REQUEST') : []),
     [data]
   );
   return (
@@ -310,12 +324,12 @@ export default function Dashboard() {
         <>
           <SectionCard title="Overview" description={`As of ${new Date(data.generatedAt).toLocaleString()}`}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-5 mb-6">
-              <StatTile label="Accounts" value={data.companies.length} />
-              <StatTile label="Portfolio ARR" value={usd(totalArrCents)} />
-              <StatTile label="Open Tickets" value={openTickets} sub="Client Submitted + In Progress" />
-              <StatTile label="Enhancement Tickets" value={data.requests.filter((r) => (r.category || '').toLowerCase().includes('enhancement') || (r.category || '').toUpperCase() === 'FEATURE_REQUEST').length} sub="by category" />
-              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent />
-              <StatTile label="Escalations" value={escalations.length} accent />
+              <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" />
+              <StatTile label="Portfolio ARR" value={usd(totalArrCents)} jumpTo="Accounts" />
+              <StatTile label="Open Tickets" value={openTicketRequests.length} sub="Client Submitted + In Progress" jumpTo="Open Tickets" />
+              <StatTile label="Enhancement Tickets" value={enhancementRequests.length} sub="by category" jumpTo="Enhancement Tickets" />
+              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent jumpTo="Top 3 Enhancements" />
+              <StatTile label="Escalations" value={escalations.length} accent jumpTo="Escalations" />
             </div>
             <QuickJumpNav sections={OVERVIEW_SECTIONS} />
           </SectionCard>
@@ -336,6 +350,22 @@ export default function Dashboard() {
             defaultExpanded={false}
           >
             <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
+          </SectionCard>
+
+          <SectionCard
+            title="Open Tickets"
+            description="Every ticket currently in Client Submitted or In Progress — the working queue, before any Top 3/Long-Term/Escalation triage happens."
+            defaultExpanded={false}
+          >
+            <RequestsTable requests={openTicketRequests} emptyLabel="Nothing currently open." />
+          </SectionCard>
+
+          <SectionCard
+            title="Enhancement Tickets"
+            description="Every ticket categorized as a feature/enhancement request, portfolio-wide — broader than Top 3 Enhancements above."
+            defaultExpanded={false}
+          >
+            <RequestsTable requests={enhancementRequests} emptyLabel="No enhancement requests right now." />
           </SectionCard>
 
           <SectionCard title="Accounts" description="Every Home Office account, its account manager, tier, and ARR — search to narrow." defaultExpanded={false}>
