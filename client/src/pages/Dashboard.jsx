@@ -33,9 +33,26 @@ function SectionCard({ title, description, action, accent, defaultExpanded = tru
 
   useEffect(() => {
     function handleJump(e) {
-      if (e.detail?.id !== sectionId) return;
-      setExpanded(true);
-      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const isTarget = e.detail?.id === sectionId;
+      if (isTarget) {
+        setExpanded(true);
+        // Wait a couple of frames so every OTHER section's collapse (set
+        // below, in their own copy of this same handler) has actually
+        // committed and repainted first — scrolling in the same tick would
+        // target a position calculated against the old, taller layout
+        // (every section still open) and land short.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+      } else if (sectionId !== 'overview') {
+        // Accordion behavior (Aaron, Sep 2026: "close other sections then
+        // expand and navigate") — Overview is exempt since it holds the
+        // KPI tiles that dispatch this jump in the first place; collapsing
+        // it out from under the tile you just clicked would be jarring.
+        setExpanded(false);
+      }
     }
     window.addEventListener(JUMP_EVENT, handleJump);
     return () => window.removeEventListener(JUMP_EVENT, handleJump);
