@@ -9,17 +9,23 @@ Read [`docs/CONTEXT.md`](docs/CONTEXT.md) first — it has the actual Slack-sour
 evidence for who this is for and what each view needs to do, and
 [`docs/FORK_PROMPT.md`](docs/FORK_PROMPT.md) for the original build brief.
 
-## Status (2026-09-21, updated same day)
+## Status (2026-09-21, updated twice same day)
 
 Pivoted mid-build: instead of the six-view decision platform, v1 leads with the
-simplest thing that's actually valuable today — a one-click Excel export, unscored,
-so Trisha's/BI's team and Ella can plug it into whatever they already use. The
-six-view plan isn't gone, just shelved (see `docs/CONTEXT.md`) — the code and routes
-are still in the repo, just not the lead nav experience.
+simplest thing that's actually valuable today — a live dashboard (with an Excel
+export alongside it), unscored, so Trisha's/BI's team and Ella can browse it in the
+browser or plug the export into whatever they already use. The six-view plan isn't
+gone, just shelved (see `docs/CONTEXT.md`) — the code and routes are still in the
+repo, just not the lead nav experience.
+
+Rebranded same day into **ALIS Product Hub** — real ALIS brand system (Tailwind
+config, colors, Lexend Exa, logo, the floating butterfly section-jump nav), ported
+directly from alis-hub's own design system rather than reinvented, so it reads as
+the same house rather than a one-off prototype.
 
 | View | Status |
 |---|---|
-| **Data Export** (Accounts + Active Requests, one Excel file) | **Live — this is v1** |
+| **Dashboard** (`/`) — Accounts + Active Requests, browsable + Excel export | **Live — this is v1** |
 | Account Truth (Contracted / Enabled / Used, one account at a time) | Live but shelved from nav — reachable at `/accounts` |
 | Decision Log | Live but shelved from nav — reachable at `/decisions` |
 | Request Queue (scored, HubSpot + Jira) | Shelved — needs Jira/Atlassian connector access |
@@ -51,19 +57,29 @@ alis-product-ops/
 │   └── FORK_PROMPT.md   # original build brief
 ├── server/
 │   ├── index.js
-│   ├── db/database.js       # sql.js — currently just the decisions table
+│   ├── db/database.js         # sql.js — currently just the decisions table
 │   ├── services/
-│   │   ├── hubspotClient.js # generic bearer-auth-over-https + retry, ported from alis-hub
+│   │   ├── hubspotClient.js   # generic bearer-auth-over-https + retry + associations, ported from alis-hub
 │   │   ├── hubspotAccounts.js # portfolio-wide company list (no owner scoping)
-│   │   └── hubspotDeals.js    # deal + line-item pull for Contract Truth
+│   │   ├── hubspotDeals.js    # deal + line-item pull for Contract Truth
+│   │   └── hubspotRequests.js # portfolio-wide active-ticket search + company join, for Dashboard
 │   └── api/
 │       ├── accounts.js
-│       └── decisions.js
+│       ├── decisions.js
+│       └── export.js          # GET /api/export — what Dashboard.jsx and the Excel export both read
 └── client/
+    ├── public/                # ALIS brand assets (logo-horizontal.png, butterfly-icon.png)
+    ├── tailwind.config.js     # same brand tokens as alis-hub's client/tailwind.config.js
     └── src/
-        ├── App.jsx           # router + nav shell
-        ├── pages/            # one file per view
-        └── components/NavShell.jsx
+        ├── App.jsx            # branded top navbar + router
+        ├── pages/
+        │   ├── Dashboard.jsx  # v1 — the live browsable view + Export to Excel button
+        │   ├── AccountTruth.jsx / DecisionLog.jsx   # shelved, still live at their routes
+        │   └── RequestQueue.jsx / PodCapacity.jsx / OnePagers.jsx / FinanceReconciliation.jsx  # shelved placeholders
+        ├── utils/dataExport.js       # ExcelJS workbook builder, same pattern as alis-hub's export utils
+        └── components/
+            ├── FloatingSectionNav.jsx  # the floating butterfly section-jump nav, ported verbatim from alis-hub
+            └── BackToTopButton.jsx
 ```
 
 ## Guardrails (carried over from alis-hub)

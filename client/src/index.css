@@ -1,107 +1,93 @@
-:root {
-  --orange: rgb(241, 96, 34);
-  --orange-dark: rgb(206, 74, 13);
-  --orange-tint: rgb(253, 245, 239);
-  --ink: rgb(45, 48, 57);
-  --ink-soft: rgb(92, 100, 119);
-  --line: rgb(221, 225, 232);
-  --paper: rgb(255, 255, 255);
-  --canvas: rgb(249, 250, 251);
-  --success: rgb(40, 143, 78);
-  --success-tint: rgb(242, 252, 245);
-  --warn: rgb(184, 134, 11);
-  --warn-tint: rgb(253, 247, 231);
-  --danger: rgb(191, 61, 61);
-  --danger-tint: rgb(253, 240, 240);
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ALIS Product Hub — same design tokens/component library as alis-hub
+   (client/src/index.css there), trimmed to what this app actually uses. */
 
 * { box-sizing: border-box; }
-
+html { scroll-behavior: smooth; }
 body {
+  background: #f9f9f9;
+  color: #2e2e30;
+  font-family: 'Lexend Exa', system-ui, -apple-system, sans-serif;
   margin: 0;
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  padding: 0;
 }
 
-.app-shell { display: flex; min-height: 100vh; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f3f3f3; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 4px; border: 2px solid #f3f3f3; }
+::-webkit-scrollbar-thumb:hover { background: #a8a8aa; }
 
-.nav {
-  width: 220px;
-  flex: none;
-  background: var(--paper);
-  border-right: 1px solid var(--line);
-  padding: 20px 12px;
+@layer components {
+  .card {
+    @apply relative bg-white border border-neutral-200 rounded-lg p-6 shadow-sm transition-all duration-300;
+  }
+  .card:hover {
+    @apply shadow-md border-2 border-accent-500;
+    background-color: rgba(250, 204, 21, 0.08);
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-base font-medium transition-all duration-200 cursor-pointer;
+  }
+  .btn-primary {
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 disabled:bg-neutral-300 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply btn bg-neutral-100 text-primary-600 hover:bg-neutral-200 active:bg-neutral-300 disabled:bg-neutral-100 disabled:text-neutral-400;
+  }
+  .btn-accent {
+    @apply btn bg-accent-500 text-white hover:bg-accent-600 active:bg-accent-700 disabled:bg-neutral-300 disabled:cursor-not-allowed;
+  }
+  .btn-sm { @apply text-sm px-3 py-1.5; }
+
+  .badge { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; }
+  .badge-success { @apply bg-green-100 text-green-800; }
+  .badge-warning { @apply bg-yellow-100 text-yellow-800; }
+  .badge-error { @apply bg-red-100 text-red-800; }
+  .badge-neutral { @apply bg-neutral-100 text-neutral-700; }
 }
 
-.nav h1 { font-size: 15px; margin: 0 0 4px 8px; }
-.nav .tagline { font-size: 11.5px; color: var(--ink-soft); margin: 0 0 20px 8px; }
-
-.nav a {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--ink);
-  font-size: 13.5px;
-  margin-bottom: 2px;
-}
-.nav a.active { background: var(--orange-tint); color: var(--orange-dark); font-weight: 600; }
-.nav a:not(.active):hover { background: var(--canvas); }
-
-.badge {
-  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
-  padding: 2px 6px; border-radius: 999px;
-}
-.badge.live { background: var(--success-tint); color: var(--success); }
-.badge.blocked { background: var(--danger-tint); color: var(--danger); }
-.badge.planned { background: var(--warn-tint); color: var(--warn); }
-
-.main { flex: 1; padding: 32px 40px; max-width: 1040px; }
-
+/* Compatibility layer for the pre-rebrand pages (Account Truth, Decision
+   Log, the shelved placeholders) — plain-CSS classes/element styles from
+   before this app had Tailwind, kept as-is rather than rewriting those
+   pages' markup. Class selectors above (.btn-*, .card, .badge-*) always
+   win over the bare element selectors here regardless of source order, so
+   this can't clash with anything Dashboard.jsx uses. */
 .page-head { margin-bottom: 24px; }
 .page-head h2 { margin: 0 0 6px; font-size: 22px; }
-.page-head p { margin: 0; color: var(--ink-soft); font-size: 14px; max-width: 640px; }
-
-.card {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 20px 22px;
-  margin-bottom: 16px;
-}
+.page-head p { margin: 0; color: #6d6e71; font-size: 14px; max-width: 640px; }
 
 .notice {
-  border-left: 3px solid var(--warn);
-  background: var(--warn-tint);
+  border-left: 3px solid #f59e0b;
+  background: #fffbeb;
   border-radius: 0 8px 8px 0;
   padding: 10px 14px;
   font-size: 13.5px;
   margin-bottom: 16px;
 }
-.notice.danger { border-left-color: var(--danger); background: var(--danger-tint); }
+.notice.danger { border-left-color: #e22405; background: #fdf0f0; }
+
+.placeholder { text-align: center; padding: 48px 24px; color: #6d6e71; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--ink-soft); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; }
+th { color: #6d6e71; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
 
-input, select, textarea {
+input:not([class]), select:not([class]), textarea:not([class]) {
   font-family: inherit; font-size: 13.5px;
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
-  background: var(--paper); color: var(--ink);
+  border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px;
+  background: #fff; color: #2e2e30; width: 100%;
 }
 
-button {
+button:not([class]) {
   font-family: inherit; font-size: 13.5px; font-weight: 600;
-  background: var(--orange); color: white; border: none; border-radius: 8px;
+  background: #f06022; color: white; border: none; border-radius: 8px;
   padding: 8px 14px; cursor: pointer;
 }
-button:hover { background: var(--orange-dark); }
-button.secondary { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
-button.secondary:hover { background: var(--canvas); }
+button:not([class]):hover { background: #ec4303; }
+button.secondary:not([class~="btn"]) { background: #fff; color: #2e2e30; border: 1px solid #e5e5e5; }
+button.secondary:not([class~="btn"]):hover { background: #f3f3f3; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.placeholder {
-  text-align: center; padding: 48px 24px; color: var(--ink-soft);
-}
