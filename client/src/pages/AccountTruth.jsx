@@ -92,7 +92,11 @@ export default function AccountTruth() {
                     <td>{d.url ? <a href={d.url} target="_blank" rel="noreferrer">{d.dealName}</a> : d.dealName}</td>
                     <td>{d.isClosed ? (d.isWon ? 'Closed Won' : 'Closed Lost') : 'Open'}</td>
                     <td>{d.arrValue != null ? d.arrValue.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }) : '—'}</td>
-                    <td>{d.lineItems.length === 0 ? '—' : d.lineItems.map((li) => li.name).join(', ')}</td>
+                    <td>
+                      {d.lineItemsBlocked
+                        ? <span style={{ color: 'var(--warn)' }}>blocked (scopes)</span>
+                        : d.lineItems.length === 0 ? '—' : d.lineItems.map((li) => li.name).join(', ')}
+                    </td>
                   </tr>
                 ))}
               </tbody>

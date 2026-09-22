@@ -22,11 +22,11 @@ router.get('/', async (req, res, next) => {
 router.get('/:id/contract-truth', async (req, res, next) => {
   try {
     const deals = await getContractedModulesForCompany(req.params.id);
-    const hasAnyLineItems = deals.some((d) => d.lineItems.length > 0);
+    const anyBlocked = deals.some((d) => d.lineItemsBlocked);
     res.json({
       deals,
-      scopeWarning: (deals.length > 0 && !hasAnyLineItems)
-        ? 'No line items came back for any deal — the HubSpot private app token is likely missing crm.objects.line_items.read / crm.schemas.line_items.read. Deal-level info (name, ARR, close date) is still real.'
+      scopeWarning: anyBlocked
+        ? 'Line items are blocked — the HubSpot private app token is missing crm.objects.line_items.read / crm.schemas.line_items.read. Deal-level info (name, ARR, close date) is still real.'
         : null,
     });
   } catch (err) {

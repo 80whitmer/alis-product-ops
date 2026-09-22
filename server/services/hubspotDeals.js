@@ -88,6 +88,13 @@ async function batchReadLineItems(lineItemIds) {
  * Every deal ever associated with a company (not just open/recent — a
  * module purchased on a 2023 deal is still contracted today), each with its
  * line items. One-time implementation-fee line items are included as-is.
+ *
+ * Line-item reads degrade to an empty array per deal (with a flag, not a
+ * thrown error) when the token lacks the required scopes — confirmed live
+ * 2026-09-21: this token 403s with MISSING_SCOPES
+ * (crm.objects.line_items.read / crm.schemas.line_items.read) on every
+ * batchReadLineItems call. Deal-level info (name, ARR, close date) is a
+ * separate, already-working call and shouldn't be lost because of it.
  */
 async function getContractedModulesForCompany(hubspotCompanyId) {
   const dealIds = await getDealIdsForCompany(hubspotCompanyId);
@@ -95,15 +102,21 @@ async function getContractedModulesForCompany(hubspotCompanyId) {
 
   const results = [];
   for (const deal of deals) {
-    const lineItemIds = await getLineItemIdsForDeal(deal.id);
-    const rawLineItems = await batchReadLineItems(lineItemIds);
-    const lineItems = rawLineItems.map((li) => ({
-      id: li.id,
-      name: li.properties.name,
-      quantity: li.properties.quantity != null ? Number(li.properties.quantity) : null,
-      price: li.properties.price != null ? Number(li.properties.price) : null,
-      recurringBillingFrequency: li.properties.recurringbillingfrequency || null,
-    }));
+    let lineItems = [];
+    let lineItemsBlocked = false;
+    try {
+      const lineItemIds = await getLineItemIdsForDeal(deal.id);
+      const rawLineItems = await batchReadLineItems(lineItemIds);
+      lineItems = rawLineItems.map((li) => ({
+        id: li.id,
+        name: li.properties.name,
+        quantity: li.properties.quantity != null ? Number(li.properties.quantity) : null,
+        price: li.properties.price != null ? Number(li.properties.price) : null,
+        recurringBillingFrequency: li.properties.recurringbillingfrequency || null,
+      }));
+    } catch (err) {
+      lineItemsBlocked = true;
+    }
 
     results.push({
       dealId: deal.id,
@@ -114,6 +127,7 @@ async function getContractedModulesForCompany(hubspotCompanyId) {
       arrValue: deal.properties.arr_value != null ? Number(deal.properties.arr_value) : null,
       url: hubspotRecordUrl('deal', deal.id),
       lineItems,
+      lineItemsBlocked,
     });
   }
   return results;
