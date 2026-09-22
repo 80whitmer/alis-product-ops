@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExportData } from '../api.js';
-import { exportDataToExcel } from '../utils/dataExport.js';
+import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 
@@ -117,6 +117,24 @@ function StatTile({ label, value, sub, accent, jumpTo }) {
 function usd(cents) {
   if (cents == null) return '—';
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+/** The per-section "Export to Excel" button in a SectionCard's header — same export utility as the holistic one, just scoped to this section's own rows. */
+function SectionExportButton({ onExport }) {
+  const [exporting, setExporting] = useState(false);
+  async function handleClick() {
+    setExporting(true);
+    try {
+      await onExport();
+    } finally {
+      setExporting(false);
+    }
+  }
+  return (
+    <button className="btn-secondary btn-sm" onClick={handleClick} disabled={exporting}>
+      {exporting ? 'Exporting…' : 'Export'}
+    </button>
+  );
 }
 
 const REQUEST_COLUMNS = 10;
@@ -339,6 +357,7 @@ export default function Dashboard() {
             description="Every ticket staged as one of an account's Top 3 Enhancement asks — the requests carrying the most explicit account-level priority signal available."
             accent
             defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(top3Enhancements, 'Top 3 Enhancements', data.generatedAt)} />}
           >
             <RequestsTable requests={top3Enhancements} emptyLabel="No tickets currently staged as Top 3 Enhancements." />
           </SectionCard>
@@ -348,6 +367,7 @@ export default function Dashboard() {
             description="Every ticket categorized as an ALIS Escalation, portfolio-wide."
             accent
             defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(escalations, 'Escalations', data.generatedAt)} />}
           >
             <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
           </SectionCard>
@@ -356,6 +376,7 @@ export default function Dashboard() {
             title="Open Tickets"
             description="Every ticket currently in Client Submitted or In Progress — the working queue, before any Top 3/Long-Term/Escalation triage happens."
             defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(openTicketRequests, 'Open Tickets', data.generatedAt)} />}
           >
             <RequestsTable requests={openTicketRequests} emptyLabel="Nothing currently open." />
           </SectionCard>
@@ -364,11 +385,17 @@ export default function Dashboard() {
             title="Enhancement Tickets"
             description="Every ticket categorized as a feature/enhancement request, portfolio-wide — broader than Top 3 Enhancements above."
             defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(enhancementRequests, 'Enhancement Tickets', data.generatedAt)} />}
           >
             <RequestsTable requests={enhancementRequests} emptyLabel="No enhancement requests right now." />
           </SectionCard>
 
-          <SectionCard title="Accounts" description="Every Home Office account, its account manager, tier, and ARR — search to narrow." defaultExpanded={false}>
+          <SectionCard
+            title="Accounts"
+            description="Every Home Office account, its account manager, tier, and ARR — search to narrow."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportAccountsToExcel(filteredAccounts, data.generatedAt)} />}
+          >
             <input
               placeholder="Search by company or account manager…"
               value={accountSearch}
@@ -399,6 +426,7 @@ export default function Dashboard() {
             title="Active Requests"
             description="Tickets modified in the last 120 days in an active stage, joined to account/AM/ARR/tier. Click a row for full detail. No scoring — raw columns to sort/filter/weight however your team already does."
             defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(stageFilteredRequests, 'Active Requests', data.generatedAt)} />}
           >
             <div className="mb-4">
               <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="min-w-[180px]">
@@ -412,7 +440,7 @@ export default function Dashboard() {
       )}
 
       <FloatingSectionNav
-        watchSectionId={slugify('Overview')}
+        watchSectionId="app-header"
         sections={OVERVIEW_SECTIONS}
         enabled={!loading && !!data}
         onSelect={(title) => window.dispatchEvent(new CustomEvent(JUMP_EVENT, { detail: { id: slugify(title) } }))}

@@ -21,7 +21,7 @@ const nav = [
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-neutral-50">
-      <header className="bg-white border-b border-neutral-200 px-6 py-4 flex items-center gap-6 shadow-sm">
+      <header id="app-header" className="bg-white border-b border-neutral-200 px-6 py-4 flex items-center gap-6 shadow-sm">
         <span className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
           <img src="/logo-horizontal.png" alt="alis" className="h-7 w-auto" />
           <span className="font-bold text-xl text-accent-500">product hub</span>

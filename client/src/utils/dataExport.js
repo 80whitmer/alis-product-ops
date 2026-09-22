@@ -1,8 +1,8 @@
 /**
- * V1 "just serve up the data" export — two raw, unscored sheets built
- * client-side from GET /api/export, same ExcelJS + Blob-download pattern
- * as alis-hub's client/src/utils/accountHealthExport.js. No queue, no
- * scoring: Trisha's/BI's team plug this into whatever they already use.
+ * V1 "just serve up the data" export — same ExcelJS + Blob-download
+ * pattern as alis-hub's client/src/utils/accountHealthExport.js. The
+ * column builders are shared by the holistic export (both sheets) and
+ * the per-section exports (one sheet each) so they can't drift apart.
  */
 import ExcelJS from 'exceljs';
 
@@ -24,12 +24,13 @@ function download(workbook, filename) {
   });
 }
 
-export async function exportDataToExcel({ companies, requests, generatedAt }) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.created = new Date(generatedAt);
+function slugify(title) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
 
-  const accountsSheet = workbook.addWorksheet('Accounts');
-  accountsSheet.columns = [
+function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.columns = [
     { header: 'Company', key: 'name', width: 34 },
     { header: 'HubSpot ID', key: 'id', width: 14 },
     { header: 'Account Manager', key: 'accountManagerName', width: 18 },
@@ -38,12 +39,15 @@ export async function exportDataToExcel({ companies, requests, generatedAt }) {
     { header: 'Lifecycle Stage (raw)', key: 'lifecycleStage', width: 20 },
   ];
   for (const c of companies) {
-    accountsSheet.addRow({ name: c.name, id: c.id, accountManagerName: c.accountManagerName, tier: c.tier, arr: usd(c.arrCents), lifecycleStage: c.lifecycleStage });
+    sheet.addRow({ name: c.name, id: c.id, accountManagerName: c.accountManagerName, tier: c.tier, arr: usd(c.arrCents), lifecycleStage: c.lifecycleStage });
   }
-  accountsSheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).font = { bold: true };
+  return sheet;
+}
 
-  const requestsSheet = workbook.addWorksheet('Active Requests');
-  requestsSheet.columns = [
+function addRequestsSheet(workbook, requests, sheetName) {
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.columns = [
     { header: 'Company', key: 'companyName', width: 30 },
     { header: 'Account Manager', key: 'accountManagerName', width: 18 },
     { header: 'Issue Type (raw)', key: 'category', width: 18 },
@@ -60,7 +64,7 @@ export async function exportDataToExcel({ companies, requests, generatedAt }) {
     { header: 'Link', key: 'url', width: 40 },
   ];
   for (const r of requests) {
-    requestsSheet.addRow({
+    sheet.addRow({
       companyName: r.companyName,
       accountManagerName: r.accountManagerName,
       category: r.category,
@@ -77,7 +81,34 @@ export async function exportDataToExcel({ companies, requests, generatedAt }) {
       url: r.url,
     });
   }
-  requestsSheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).font = { bold: true };
+  return sheet;
+}
 
+/** The holistic export — both sheets, one file. */
+export async function exportDataToExcel({ companies, requests, generatedAt }) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  addAccountsSheet(workbook, companies);
+  addRequestsSheet(workbook, requests, 'Active Requests');
   await download(workbook, `alis-product-data-${generatedAt.slice(0, 10)}.xlsx`);
+}
+
+/** Per-section export — the Accounts section's own button. */
+export async function exportAccountsToExcel(companies, generatedAt) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  addAccountsSheet(workbook, companies);
+  await download(workbook, `alis-product-hub-accounts-${generatedAt.slice(0, 10)}.xlsx`);
+}
+
+/** Per-section export — one sheet named after whichever request section (Top 3 Enhancements, Escalations, Open Tickets, Enhancement Tickets, Active Requests) called it. */
+export async function exportRequestsToExcel(requests, sectionTitle, generatedAt) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  // Worksheet names cap at 31 chars and can't hold : \ / ? * [ ] — none of
+  // our section titles hit that today, but truncate defensively rather
+  // than let ExcelJS throw on some future longer title.
+  addRequestsSheet(workbook, requests, sectionTitle.slice(0, 31));
+  await download(workbook, `alis-product-hub-${slugify(sectionTitle)}-${generatedAt.slice(0, 10)}.xlsx`);
 }
