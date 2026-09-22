@@ -36,10 +36,29 @@ function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
     { header: 'Account Manager', key: 'accountManagerName', width: 18 },
     { header: 'Tier', key: 'tier', width: 8 },
     { header: 'ARR ($)', key: 'arr', width: 14 },
+    { header: 'Communities', key: 'communityCount', width: 12 },
+    { header: 'Capacity (beds)', key: 'totalCapacity', width: 14 },
+    { header: 'Open Deals', key: 'openDealsCount', width: 11 },
+    { header: 'Open Deal Value ($)', key: 'openDealValue', width: 16 },
+    { header: `ARR Added (${new Date().getFullYear()}) ($)`, key: 'arrAdded', width: 16 },
+    { header: 'Last Activity', key: 'lastActivityDate', width: 14 },
     { header: 'Lifecycle Stage (raw)', key: 'lifecycleStage', width: 20 },
   ];
   for (const c of companies) {
-    sheet.addRow({ name: c.name, id: c.id, accountManagerName: c.accountManagerName, tier: c.tier, arr: usd(c.arrCents), lifecycleStage: c.lifecycleStage });
+    sheet.addRow({
+      name: c.name,
+      id: c.id,
+      accountManagerName: c.accountManagerName,
+      tier: c.tier,
+      arr: usd(c.arrCents),
+      communityCount: c.communityCount,
+      totalCapacity: c.totalCapacity,
+      openDealsCount: c.openDealsCount,
+      openDealValue: usd(c.openDealValueCents),
+      arrAdded: usd(c.arrAddedThisYearCents),
+      lastActivityDate: c.lastActivityDate ? c.lastActivityDate.slice(0, 10) : '',
+      lifecycleStage: c.lifecycleStage,
+    });
   }
   sheet.getRow(1).font = { bold: true };
   return sheet;

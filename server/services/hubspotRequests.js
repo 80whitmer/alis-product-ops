@@ -10,7 +10,7 @@
  * Same category_2_0 convention as alis-hub's server/services/hubspotTickets.js
  * (see that file's doc comment for the "true"/"false" stored-value quirk).
  */
-const { hubspotRequest, chunk, hubspotRecordUrl, getPipelineStageLabels, batchGetCompanyIdsForTickets } = require('./hubspotClient');
+const { hubspotRequest, chunk, hubspotRecordUrl, getPipelineStageLabels, batchGetCompanyIdsFor } = require('./hubspotClient');
 
 const CATEGORY_2_0_LABELS = {
   false: 'General Question',
@@ -82,7 +82,7 @@ async function getActiveRequestRows({ lookbackDays = 120, companiesById = new Ma
     return label ? ACTIVE_STAGE_LABELS.has(label.stage) : false;
   });
 
-  const companyIdsByTicket = await batchGetCompanyIdsForTickets(active.map((t) => t.id));
+  const companyIdsByTicket = await batchGetCompanyIdsFor('tickets', active.map((t) => t.id));
 
   return active.map((t) => {
     const p = t.properties;

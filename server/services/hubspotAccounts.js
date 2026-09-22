@@ -7,7 +7,7 @@
  */
 const { hubspotRequest } = require('./hubspotClient');
 
-const COMPANY_PROPERTIES = ['name', 'account_manager', 'hs_num_child_companies', 'lifecyclestage', 'createdate', 'arr', 'client_tier', 'client_teir_2_0'];
+const COMPANY_PROPERTIES = ['name', 'account_manager', 'hs_num_child_companies', 'lifecyclestage', 'createdate', 'arr', 'client_tier', 'client_teir_2_0', 'notes_last_updated', 'company_total_capacity'];
 
 function resolveTier(properties) {
   const newTier = properties.client_teir_2_0;
@@ -62,6 +62,18 @@ async function getAllHomeOfficeCompanies() {
       tier: resolveTier(c.properties),
       accountManagerId: c.properties.account_manager || null,
       accountManagerName: getAccountManagerName(c.properties.account_manager),
+      lastActivityDate: c.properties.notes_last_updated || null,
+      // Community count is HubSpot's own child-company count for this
+      // Home Office — not an ALIS pull. Total capacity is a HubSpot
+      // property too (company_total_capacity), hand-maintained per
+      // alis-hub's own comment on this field, not live ALIS floor-plan
+      // data — directional, not exact, but real and needs no ALIS
+      // credentials, which this app deliberately doesn't take (Aaron,
+      // Sep 2026).
+      communityCount: c.properties.hs_num_child_companies != null && c.properties.hs_num_child_companies !== ''
+        ? Number(c.properties.hs_num_child_companies) : null,
+      totalCapacity: c.properties.company_total_capacity != null && c.properties.company_total_capacity !== ''
+        ? Number(c.properties.company_total_capacity) : null,
     })));
     after = body.paging?.next?.after;
   } while (after);

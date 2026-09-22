@@ -106,11 +106,18 @@ async function getPipelineStageLabels(objectType) {
   return pipelineStageLabelCachePromises.get(objectType);
 }
 
-/** Company IDs associated with a batch of tickets, via the v4 batch associations endpoint — one call per <=100 tickets instead of one call per ticket. Returns a Map<ticketId, companyId[]>. */
-async function batchGetCompanyIdsForTickets(ticketIds) {
+/**
+ * Company IDs associated with a batch of objects (tickets, deals, ...) via
+ * the v4 batch associations endpoint — one call per <=100 objects instead
+ * of one call per object. Returns a Map<objectId, companyId[]>. Generic
+ * over `fromObjectType` since both hubspotRequests.js (tickets) and
+ * hubspotDealsSummary.js (deals) need the identical company join, just
+ * against a different source object.
+ */
+async function batchGetCompanyIdsFor(fromObjectType, objectIds) {
   const result = new Map();
-  for (const batch of chunk(ticketIds, 100)) {
-    const { status, body } = await hubspotRequest('POST', '/crm/v4/associations/tickets/companies/batch/read', {
+  for (const batch of chunk(objectIds, 100)) {
+    const { status, body } = await hubspotRequest('POST', `/crm/v4/associations/${fromObjectType}/companies/batch/read`, {
       inputs: batch.map((id) => ({ id })),
     });
     // HubSpot's v4 batch associations endpoint returns 207 (Multi-Status)
@@ -118,20 +125,20 @@ async function batchGetCompanyIdsForTickets(ticketIds) {
     // "COMPLETE", every input resolved). Only a body.status other than
     // COMPLETE (or a non-2xx) means something actually went wrong.
     if (status >= 300 || (body.status && body.status !== 'COMPLETE')) {
-      throw new Error(`HubSpot ticket->company batch associations failed (${status}): ${JSON.stringify(body)}`);
+      throw new Error(`HubSpot ${fromObjectType}->company batch associations failed (${status}): ${JSON.stringify(body)}`);
     }
     for (const entry of body.results || []) {
-      const ticketId = entry.from?.id;
+      const objectId = entry.from?.id;
       // toObjectId comes back as a raw JSON number (confirmed live
       // 2026-09-21), while every company ID elsewhere in this app (from
       // the v3 search/batch-read endpoints) is a string — stringify here
       // so callers can key a Map by company ID without every lookup
       // silently missing on a type mismatch.
       const companyIds = (entry.to || []).map((t) => String(t.toObjectId ?? t.id));
-      if (ticketId) result.set(ticketId, companyIds);
+      if (objectId) result.set(objectId, companyIds);
     }
   }
   return result;
 }
 
-module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE, getPipelineStageLabels, batchGetCompanyIdsForTickets };
+module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE, getPipelineStageLabels, batchGetCompanyIdsFor };

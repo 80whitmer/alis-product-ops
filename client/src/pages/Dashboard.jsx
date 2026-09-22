@@ -13,7 +13,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
   { category: 'Highlighted', items: ['Top 3 Enhancements', 'Escalations'] },
-  { category: 'Everything', items: ['Accounts', 'Open Tickets', 'Enhancement Tickets', 'Active Requests'] },
+  { category: 'Everything', items: ['Accounts', 'Enhancement Tickets', 'Open Tickets', 'Active Requests'] },
 ];
 
 // Same label alis-hub's ticket pipelines use for a ticket staged as one of
@@ -112,14 +112,15 @@ function QuickJumpNav({ sections }) {
 }
 
 /** A KPI tile that jumps to its own section when a target is given — same "hover grows, feels clickable" convention as alis-hub's StatCard jumpTo tiles, just scoped to this one component instead of every .card. */
-function StatTile({ label, value, sub, accent, jumpTo }) {
+function StatTile({ label, value, sub, accent, jumpTo, tooltip }) {
   const clickable = Boolean(jumpTo);
+  const title = [tooltip, clickable ? `Click to jump to ${jumpTo}` : null].filter(Boolean).join(' — ') || undefined;
   return (
     <button
       type="button"
       onClick={clickable ? () => window.dispatchEvent(new CustomEvent(JUMP_EVENT, { detail: { id: slugify(jumpTo) } })) : undefined}
       disabled={!clickable}
-      title={clickable ? `Jump to ${jumpTo}` : undefined}
+      title={title}
       className={`text-left rounded-xl p-6 border w-full transition-all duration-200 ${
         accent ? 'bg-accent-50 border-accent-300' : 'bg-white border-neutral-200'
       } ${clickable ? 'cursor-pointer hover:scale-[1.03] hover:shadow-lg hover:border-accent-400' : 'cursor-default'}`}
@@ -321,6 +322,14 @@ export default function Dashboard() {
     () => (data ? data.companies.reduce((sum, c) => sum + (c.arrCents || 0), 0) : 0),
     [data]
   );
+  const totalCommunities = useMemo(
+    () => (data ? data.companies.reduce((sum, c) => sum + (c.communityCount || 0), 0) : 0),
+    [data]
+  );
+  const totalCapacityBeds = useMemo(
+    () => (data ? data.companies.reduce((sum, c) => sum + (c.totalCapacity || 0), 0) : 0),
+    [data]
+  );
   const openTicketRequests = useMemo(
     () => (data ? data.requests.filter((r) => r.stage === 'Client Submitted' || r.stage === 'In Progress') : []),
     [data]
@@ -358,15 +367,68 @@ export default function Dashboard() {
       {data && (
         <>
           <SectionCard title="Overview" description={`As of ${new Date(data.generatedAt).toLocaleString()}`}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5 mb-6">
-              <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" />
-              <StatTile label="Portfolio ARR" value={usd(totalArrCents)} jumpTo="Accounts" />
-              <StatTile label="Open Tickets" value={openTicketRequests.length} sub="Client Submitted + In Progress" jumpTo="Open Tickets" />
-              <StatTile label="Enhancement Tickets" value={enhancementRequests.length} sub="by category" jumpTo="Enhancement Tickets" />
-              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent jumpTo="Top 3 Enhancements" />
-              <StatTile label="Escalations" value={escalations.length} accent jumpTo="Escalations" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 mb-6">
+              <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" tooltip="Every Home Office account in HubSpot" />
+              <StatTile label="Portfolio ARR" value={usd(totalArrCents)} jumpTo="Accounts" tooltip="Sum of HubSpot's own company-level ARR field across every account" />
+              <StatTile label="Communities" value={totalCommunities.toLocaleString()} jumpTo="Accounts" tooltip="Sum of each account's child-company count in HubSpot — one per physical community/location" />
+              <StatTile label="Capacity (beds)" value={totalCapacityBeds.toLocaleString()} jumpTo="Accounts" tooltip="Sum of HubSpot's company_total_capacity field — hand-maintained per account, not a live ALIS pull, so treat as directional" />
+              <StatTile label="Open Tickets" value={openTicketRequests.length} sub="Client Submitted + In Progress" jumpTo="Open Tickets" tooltip="Tickets in an actively-being-worked stage, not yet triaged into Top 3/Long-Term/closed" />
+              <StatTile label="Enhancement Tickets" value={enhancementRequests.length} sub="by category" jumpTo="Enhancement Tickets" tooltip="Every active ticket whose HubSpot category is a feature/enhancement request" />
+              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent jumpTo="Top 3 Enhancements" tooltip="Tickets an account manager has explicitly staged as one of their account's top 3 priorities" />
+              <StatTile label="Escalations" value={escalations.length} accent jumpTo="Escalations" tooltip="Tickets categorized ALIS Escalation ('ALIS Bug' in HubSpot's raw category_2_0 field)" />
             </div>
             <QuickJumpNav sections={OVERVIEW_SECTIONS} />
+          </SectionCard>
+
+          <SectionCard
+            title="Accounts"
+            description="Every Home Office account, its account manager, tier, and ARR — search to narrow."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportAccountsToExcel(filteredAccounts, data.generatedAt)} />}
+          >
+            <input
+              placeholder="Search by company or account manager…"
+              value={accountSearch}
+              onChange={(e) => setAccountSearch(e.target.value)}
+              className="w-full mb-4"
+            />
+            <div className="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Account Manager</th>
+                    <th>Tier</th>
+                    <th>ARR</th>
+                    <th title="Sum of each account's child-company count in HubSpot">Communities</th>
+                    <th title="HubSpot's company_total_capacity field — hand-maintained, not a live ALIS pull">Capacity</th>
+                    <th title="Deals not yet closed, associated with this account">Open Deals</th>
+                    <th title="Sum of ARR value across this account's open deals">Open Deal Value</th>
+                    <th title="Sum of ARR value across deals closed-won this calendar year">ARR Added ({new Date().getFullYear()})</th>
+                    <th title="Last time a note, call, email, meeting, or task was logged for this account in HubSpot">Last Activity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAccounts.slice(0, 50).map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.name}</td>
+                      <td>{a.accountManagerName || '—'}</td>
+                      <td>{a.tier ?? '—'}</td>
+                      <td>{usd(a.arrCents)}</td>
+                      <td>{a.communityCount ?? '—'}</td>
+                      <td>{a.totalCapacity ?? '—'}</td>
+                      <td>{a.openDealsCount ?? 0}</td>
+                      <td>{usd(a.openDealValueCents)}</td>
+                      <td>{usd(a.arrAddedThisYearCents)}</td>
+                      <td>{a.lastActivityDate ? a.lastActivityDate.slice(0, 10) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredAccounts.length > 50 && (
+              <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredAccounts.length} — narrow your search.</p>
+            )}
           </SectionCard>
 
           <SectionCard
@@ -390,15 +452,6 @@ export default function Dashboard() {
           </SectionCard>
 
           <SectionCard
-            title="Open Tickets"
-            description="Every ticket currently in Client Submitted or In Progress — the working queue, before any Top 3/Long-Term/Escalation triage happens."
-            defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportRequestsToExcel(openTicketRequests, 'Open Tickets', data.generatedAt)} />}
-          >
-            <RequestsTable requests={openTicketRequests} emptyLabel="Nothing currently open." />
-          </SectionCard>
-
-          <SectionCard
             title="Enhancement Tickets"
             description="Every ticket categorized as a feature/enhancement request, portfolio-wide — broader than Top 3 Enhancements above."
             defaultExpanded={false}
@@ -408,35 +461,12 @@ export default function Dashboard() {
           </SectionCard>
 
           <SectionCard
-            title="Accounts"
-            description="Every Home Office account, its account manager, tier, and ARR — search to narrow."
+            title="Open Tickets"
+            description="Every ticket currently in Client Submitted or In Progress — the working queue, before any Top 3/Long-Term/Escalation triage happens."
             defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportAccountsToExcel(filteredAccounts, data.generatedAt)} />}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(openTicketRequests, 'Open Tickets', data.generatedAt)} />}
           >
-            <input
-              placeholder="Search by company or account manager…"
-              value={accountSearch}
-              onChange={(e) => setAccountSearch(e.target.value)}
-              className="w-full mb-4"
-            />
-            <div className="overflow-x-auto">
-              <table>
-                <thead><tr><th>Company</th><th>Account Manager</th><th>Tier</th><th>ARR</th></tr></thead>
-                <tbody>
-                  {filteredAccounts.slice(0, 50).map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.name}</td>
-                      <td>{a.accountManagerName || '—'}</td>
-                      <td>{a.tier ?? '—'}</td>
-                      <td>{usd(a.arrCents)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {filteredAccounts.length > 50 && (
-              <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredAccounts.length} — narrow your search.</p>
-            )}
+            <RequestsTable requests={openTicketRequests} emptyLabel="Nothing currently open." />
           </SectionCard>
 
           <SectionCard
