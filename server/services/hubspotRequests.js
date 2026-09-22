@@ -104,6 +104,7 @@ async function getActiveRequestRows({ lookbackDays = 120, companiesById = new Ma
       companyName: company?.name || (companyId ? '(company not in portfolio list)' : null),
       arrCents: company?.arrCents ?? null,
       tier: company?.tier ?? null,
+      accountManagerName: company?.accountManagerName ?? null,
       url: hubspotRecordUrl('ticket', t.id),
     };
   });

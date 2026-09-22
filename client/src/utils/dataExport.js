@@ -32,22 +32,24 @@ export async function exportDataToExcel({ companies, requests, generatedAt }) {
   accountsSheet.columns = [
     { header: 'Company', key: 'name', width: 34 },
     { header: 'HubSpot ID', key: 'id', width: 14 },
+    { header: 'Account Manager', key: 'accountManagerName', width: 18 },
     { header: 'Tier', key: 'tier', width: 8 },
     { header: 'ARR ($)', key: 'arr', width: 14 },
     { header: 'Lifecycle Stage (raw)', key: 'lifecycleStage', width: 20 },
   ];
   for (const c of companies) {
-    accountsSheet.addRow({ name: c.name, id: c.id, tier: c.tier, arr: usd(c.arrCents), lifecycleStage: c.lifecycleStage });
+    accountsSheet.addRow({ name: c.name, id: c.id, accountManagerName: c.accountManagerName, tier: c.tier, arr: usd(c.arrCents), lifecycleStage: c.lifecycleStage });
   }
   accountsSheet.getRow(1).font = { bold: true };
 
   const requestsSheet = workbook.addWorksheet('Active Requests');
   requestsSheet.columns = [
     { header: 'Company', key: 'companyName', width: 30 },
+    { header: 'Account Manager', key: 'accountManagerName', width: 18 },
+    { header: 'Issue Type (raw)', key: 'category', width: 18 },
     { header: 'Tier', key: 'tier', width: 8 },
     { header: 'ARR ($)', key: 'arr', width: 14 },
     { header: 'Subject', key: 'subject', width: 50 },
-    { header: 'Category (raw)', key: 'category', width: 18 },
     { header: 'Pipeline', key: 'pipeline', width: 18 },
     { header: 'Stage', key: 'stage', width: 18 },
     { header: 'Priority', key: 'priority', width: 10 },
@@ -60,10 +62,11 @@ export async function exportDataToExcel({ companies, requests, generatedAt }) {
   for (const r of requests) {
     requestsSheet.addRow({
       companyName: r.companyName,
+      accountManagerName: r.accountManagerName,
+      category: r.category,
       tier: r.tier,
       arr: usd(r.arrCents),
       subject: r.subject,
-      category: r.category,
       pipeline: r.pipeline,
       stage: r.stage,
       priority: r.priority,

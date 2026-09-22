@@ -109,17 +109,19 @@ function usd(cents) {
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-const REQUEST_COLUMNS = 8;
+const REQUEST_COLUMNS = 10;
 
-/** One ticket row, click-to-expand into its full detail — category, pipeline, both dates, ticket id, and the HubSpot link, none of which fit in the summary row. */
+/** One ticket row, click-to-expand into its full detail — pipeline, both dates, ticket id, and the HubSpot link, none of which fit in the summary row. */
 function RequestRow({ r, expanded, onToggle }) {
   return (
     <>
       <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
         <td>{r.companyName || '—'}</td>
+        <td>{r.accountManagerName || '—'}</td>
+        <td>{r.category || '—'}</td>
         <td>{r.tier ?? '—'}</td>
         <td>{usd(r.arrCents)}</td>
-        <td className="max-w-[260px] truncate" title={r.subject}>{r.subject}</td>
+        <td className="max-w-[240px] truncate" title={r.subject}>{r.subject}</td>
         <td>{r.stage}</td>
         <td>{r.priority || '—'}</td>
         <td>{r.ageDays != null ? `${r.ageDays}d` : '—'}</td>
@@ -131,7 +133,6 @@ function RequestRow({ r, expanded, onToggle }) {
             <div className="py-3 px-2 text-sm">
               <p className="font-medium text-primary-900 mb-2">{r.subject}</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5 text-xs text-neutral-600">
-                <div><span className="text-neutral-400">Category:</span> {r.category || '—'}</div>
                 <div><span className="text-neutral-400">Pipeline:</span> {r.pipeline}</div>
                 <div><span className="text-neutral-400">Ticket ID:</span> {r.ticketId}</div>
                 <div><span className="text-neutral-400">Created:</span> {r.createdAt ? r.createdAt.slice(0, 10) : '—'}</div>
@@ -146,35 +147,71 @@ function RequestRow({ r, expanded, onToggle }) {
   );
 }
 
-/** Shared table body for every request list on this page — Top 3 Enhancements, Escalations, and the full Active Requests list all render through this so the expand behavior stays identical. */
-function RequestsTable({ requests, emptyLabel }) {
+/**
+ * Shared table for every request list on this page — Top 3 Enhancements,
+ * Escalations, and Active Requests all render through this so search,
+ * columns, and the expand behavior can't drift between sections. `search`
+ * (when `showSearch`) matches company, account manager, issue type
+ * (category), and subject — the four things you'd actually go looking for
+ * a ticket by.
+ */
+function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) {
   const [expandedId, setExpandedId] = useState(null);
+  const [search, setSearch] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return requests;
+    return requests.filter((r) =>
+      r.companyName?.toLowerCase().includes(q) ||
+      r.accountManagerName?.toLowerCase().includes(q) ||
+      r.category?.toLowerCase().includes(q) ||
+      r.subject?.toLowerCase().includes(q)
+    );
+  }, [requests, search]);
 
   if (requests.length === 0) {
     return <p className="text-sm text-neutral-500 py-4">{emptyLabel}</p>;
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table>
-        <thead>
-          <tr>
-            <th>Company</th><th>Tier</th><th>ARR</th><th>Subject</th>
-            <th>Stage</th><th>Priority</th><th>Age</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {requests.map((r) => (
-            <RequestRow
-              key={r.ticketId}
-              r={r}
-              expanded={expandedId === r.ticketId}
-              onToggle={() => setExpandedId(expandedId === r.ticketId ? null : r.ticketId)}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {showSearch && (
+        <input
+          placeholder="Search company, account manager, issue type, or subject…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full mb-4"
+        />
+      )}
+      {filtered.length === 0 ? (
+        <p className="text-sm text-neutral-500 py-4">No requests match that search.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th><th>Account Manager</th><th>Issue Type</th><th>Tier</th><th>ARR</th>
+                <th>Subject</th><th>Stage</th><th>Priority</th><th>Age</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, limit).map((r) => (
+                <RequestRow
+                  key={r.ticketId}
+                  r={r}
+                  expanded={expandedId === r.ticketId}
+                  onToggle={() => setExpandedId(expandedId === r.ticketId ? null : r.ticketId)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {filtered.length > limit && (
+        <p className="text-xs text-neutral-400 mt-2">Showing {limit} of {filtered.length} — narrow your search, or export for the full list.</p>
+      )}
+    </>
   );
 }
 
@@ -184,7 +221,6 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
-  const [requestSearch, setRequestSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
 
   function load() {
@@ -211,7 +247,10 @@ export default function Dashboard() {
   const filteredAccounts = useMemo(() => {
     if (!data) return [];
     const q = accountSearch.trim().toLowerCase();
-    return q ? data.companies.filter((a) => a.name?.toLowerCase().includes(q)) : data.companies;
+    if (!q) return data.companies;
+    return data.companies.filter((a) =>
+      a.name?.toLowerCase().includes(q) || a.accountManagerName?.toLowerCase().includes(q)
+    );
   }, [data, accountSearch]);
 
   const stages = useMemo(() => {
@@ -219,15 +258,10 @@ export default function Dashboard() {
     return [...new Set(data.requests.map((r) => r.stage).filter(Boolean))].sort();
   }, [data]);
 
-  const filteredRequests = useMemo(() => {
+  const stageFilteredRequests = useMemo(() => {
     if (!data) return [];
-    const q = requestSearch.trim().toLowerCase();
-    return data.requests.filter((r) => {
-      const matchesSearch = !q || r.subject?.toLowerCase().includes(q) || r.companyName?.toLowerCase().includes(q);
-      const matchesStage = stageFilter === 'all' || r.stage === stageFilter;
-      return matchesSearch && matchesStage;
-    });
-  }, [data, requestSearch, stageFilter]);
+    return stageFilter === 'all' ? data.requests : data.requests.filter((r) => r.stage === stageFilter);
+  }, [data, stageFilter]);
 
   const top3Enhancements = useMemo(
     () => (data ? data.requests.filter((r) => r.stage === TOP_3_STAGE) : []),
@@ -246,11 +280,6 @@ export default function Dashboard() {
     () => (data ? data.requests.filter((r) => r.stage === 'Client Submitted' || r.stage === 'In Progress').length : 0),
     [data]
   );
-  const staleRequests = useMemo(
-    () => (data ? data.requests.filter((r) => (r.ageDays ?? 0) > 90).length : 0),
-    [data]
-  );
-
   return (
     <>
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
@@ -295,6 +324,7 @@ export default function Dashboard() {
             title="Top 3 Enhancements"
             description="Every ticket staged as one of an account's Top 3 Enhancement asks — the requests carrying the most explicit account-level priority signal available."
             accent
+            defaultExpanded={false}
           >
             <RequestsTable requests={top3Enhancements} emptyLabel="No tickets currently staged as Top 3 Enhancements." />
           </SectionCard>
@@ -303,24 +333,26 @@ export default function Dashboard() {
             title="Escalations"
             description="Every ticket categorized as an ALIS Escalation, portfolio-wide."
             accent
+            defaultExpanded={false}
           >
             <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
           </SectionCard>
 
-          <SectionCard title="Accounts" description="Every Home Office account, tier, and ARR — search to narrow.">
+          <SectionCard title="Accounts" description="Every Home Office account, its account manager, tier, and ARR — search to narrow." defaultExpanded={false}>
             <input
-              placeholder="Search accounts…"
+              placeholder="Search by company or account manager…"
               value={accountSearch}
               onChange={(e) => setAccountSearch(e.target.value)}
               className="w-full mb-4"
             />
             <div className="overflow-x-auto">
               <table>
-                <thead><tr><th>Company</th><th>Tier</th><th>ARR</th></tr></thead>
+                <thead><tr><th>Company</th><th>Account Manager</th><th>Tier</th><th>ARR</th></tr></thead>
                 <tbody>
                   {filteredAccounts.slice(0, 50).map((a) => (
                     <tr key={a.id}>
                       <td>{a.name}</td>
+                      <td>{a.accountManagerName || '—'}</td>
                       <td>{a.tier ?? '—'}</td>
                       <td>{usd(a.arrCents)}</td>
                     </tr>
@@ -335,24 +367,16 @@ export default function Dashboard() {
 
           <SectionCard
             title="Active Requests"
-            description="Tickets modified in the last 120 days in an active stage, joined to account ARR/tier. Click a row for full detail. No scoring — raw columns to sort/filter/weight however your team already does."
+            description="Tickets modified in the last 120 days in an active stage, joined to account/AM/ARR/tier. Click a row for full detail. No scoring — raw columns to sort/filter/weight however your team already does."
+            defaultExpanded={false}
           >
-            <div className="flex gap-3 mb-4 flex-wrap">
-              <input
-                placeholder="Search by subject or account…"
-                value={requestSearch}
-                onChange={(e) => setRequestSearch(e.target.value)}
-                className="flex-1 min-w-[220px]"
-              />
+            <div className="mb-4">
               <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="min-w-[180px]">
                 <option value="all">All stages</option>
                 {stages.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <RequestsTable requests={filteredRequests.slice(0, 50)} emptyLabel="No requests match that search." />
-            {filteredRequests.length > 50 && (
-              <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredRequests.length} — narrow your search, or export for the full list.</p>
-            )}
+            <RequestsTable requests={stageFilteredRequests} emptyLabel="No requests in this stage." />
           </SectionCard>
         </>
       )}
