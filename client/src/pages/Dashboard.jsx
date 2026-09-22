@@ -25,13 +25,16 @@ const TOP_3_STAGE = 'Top 3 Enhancements';
 // "this is an escalation" flag the data has today.
 const ESCALATION_CATEGORY = 'ALIS Escalation';
 
-function SectionCard({ title, description, action, accent, children }) {
+/** Collapsible white card, same fold/jump pattern as alis-hub's own dashboards — click the title to fold; jumping here from QuickJumpNav/FloatingSectionNav always unfolds it first. */
+function SectionCard({ title, description, action, accent, defaultExpanded = true, children }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const ref = useRef(null);
   const sectionId = slugify(title);
 
   useEffect(() => {
     function handleJump(e) {
       if (e.detail?.id !== sectionId) return;
+      setExpanded(true);
       ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     window.addEventListener(JUMP_EVENT, handleJump);
@@ -44,14 +47,20 @@ function SectionCard({ title, description, action, accent, children }) {
       ref={ref}
       className={`card mb-8 scroll-mt-4 ${accent ? 'border-l-4 border-l-accent-500' : ''}`}
     >
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-primary-900">{title}</h2>
-          {description && <p className="text-xs text-neutral-500 mt-1">{description}</p>}
+      <div
+        className="mb-4 flex items-start justify-between gap-4 cursor-pointer select-none"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-start gap-2">
+          <span className="text-xs text-neutral-400 mt-1.5">{expanded ? '▼' : '▶'}</span>
+          <div>
+            <h2 className="text-lg font-semibold text-primary-900">{title}</h2>
+            {description && <p className="text-xs text-neutral-500 mt-1">{description}</p>}
+          </div>
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {action && <div className="shrink-0" onClick={(e) => e.stopPropagation()}>{action}</div>}
       </div>
-      {children}
+      {expanded && children}
     </div>
   );
 }
@@ -87,10 +96,10 @@ function QuickJumpNav({ sections }) {
 
 function StatTile({ label, value, sub, accent }) {
   return (
-    <div className={`bg-white border rounded-lg p-4 ${accent ? 'border-accent-300' : 'border-neutral-200'}`}>
-      <div className={`text-2xl font-bold ${accent ? 'text-accent-600' : 'text-primary-900'}`}>{value}</div>
-      <div className="text-xs text-neutral-500 mt-1">{label}</div>
-      {sub && <div className="text-[11px] text-neutral-400 mt-0.5">{sub}</div>}
+    <div className={`rounded-xl p-6 border ${accent ? 'bg-accent-50 border-accent-300' : 'bg-white border-neutral-200'}`}>
+      <div className={`text-4xl font-bold leading-none tabular-nums ${accent ? 'text-accent-600' : 'text-primary-900'}`}>{value}</div>
+      <div className={`text-sm font-medium mt-2.5 ${accent ? 'text-accent-700' : 'text-neutral-600'}`}>{label}</div>
+      {sub && <div className="text-xs text-neutral-400 mt-1">{sub}</div>}
     </div>
   );
 }
@@ -271,7 +280,7 @@ export default function Dashboard() {
       {data && (
         <>
           <SectionCard title="Overview" description={`As of ${new Date(data.generatedAt).toLocaleString()}`}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-5 mb-6">
               <StatTile label="Accounts" value={data.companies.length} />
               <StatTile label="Portfolio ARR" value={usd(totalArrCents)} />
               <StatTile label="Open Tickets" value={openTickets} sub="Client Submitted + In Progress" />
