@@ -12,8 +12,8 @@ function slugify(title) {
 const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
-  { category: 'Highlighted', items: ['Top 3 Enhancements', 'Escalations'] },
-  { category: 'Everything', items: ['Accounts', 'Enhancement Tickets', 'Open Tickets', 'Active Requests'] },
+  { category: 'Highlighted', items: ['Escalations', 'Top 3 Enhancements'] },
+  { category: 'Everything', items: ['Accounts', 'Active Requests', 'Enhancement Tickets', 'Open Tickets'] },
 ];
 
 // Same label alis-hub's ticket pipelines use for a ticket staged as one of
