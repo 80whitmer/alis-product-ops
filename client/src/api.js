@@ -11,6 +11,7 @@ async function request(path, options) {
 }
 
 export const getAccounts = () => request('/accounts');
+export const getExportData = () => request('/export');
 export const getContractTruth = (id) => request(`/accounts/${id}/contract-truth`);
 export const getDecisions = () => request('/decisions');
 export const createDecision = (decision) => request('/decisions', { method: 'POST', body: JSON.stringify(decision) });

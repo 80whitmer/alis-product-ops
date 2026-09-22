@@ -45,6 +45,25 @@ features or services for any clients until we have a contract signed"*). Dave's 
 contract-state vs. entitlement-state vs. billing-state reconciliation and ARR exposure
 behind open requests — not TC's prioritization view. Same backend, separate surface.
 
+## 2026-09-21 pivot: v1 is a data export, not a tool
+
+Ella's original ask, before any of the six-view plan below existed, was simpler than
+all of it: a spreadsheet she could refresh with realtime ALIS-client data. Rather than
+build the all-encompassing platform first, v1 leads with exactly that — **Data Export**
+(`/export` in the nav): one button, pulls live from HubSpot, downloads one Excel file
+with two unscored sheets (Accounts; Active Requests joined to account ARR/tier). No
+prioritization logic, no decision log surfaced by default — just the evidence data the
+report's principles call for, in a shape Trisha's/BI's team can drop into their
+existing #bi-priority sheet or DOMO themselves. If they need more than raw data
+(scoring, a live dashboard, Jira merged in), that's the signal to build further into
+the six-view plan below — not before.
+
+Account Truth and Decision Log are still fully built and live, just moved out of the
+default nav (see `client/src/components/NavShell.jsx`) since they're part of the
+larger tool being held back, not the v1 ask. Request Queue/Pod Capacity/One-
+Pagers/Finance Reconciliation remain exactly as before — shelved, not started or
+blocked on Jira.
+
 ## The six views (build in this order — don't build all six at once)
 
 1. **Unified, scored request queue** — every open enhancement/escalation/BI ask in one

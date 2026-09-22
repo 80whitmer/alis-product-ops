@@ -9,22 +9,28 @@ Read [`docs/CONTEXT.md`](docs/CONTEXT.md) first — it has the actual Slack-sour
 evidence for who this is for and what each view needs to do, and
 [`docs/FORK_PROMPT.md`](docs/FORK_PROMPT.md) for the original build brief.
 
-## Status (2026-09-21)
+## Status (2026-09-21, updated same day)
+
+Pivoted mid-build: instead of the six-view decision platform, v1 leads with the
+simplest thing that's actually valuable today — a one-click Excel export, unscored,
+so Trisha's/BI's team and Ella can plug it into whatever they already use. The
+six-view plan isn't gone, just shelved (see `docs/CONTEXT.md`) — the code and routes
+are still in the repo, just not the lead nav experience.
 
 | View | Status |
 |---|---|
-| Request Queue (scored, HubSpot + Jira) | **Blocked** — needs Jira/Atlassian connector access |
-| Account Truth (Contracted / Enabled / Used) | **Contracted live**; Enabled + Used not ported yet |
-| Pod Capacity | Not started — same Jira gate |
-| One-Pagers | Not started |
-| Finance Reconciliation (Dave) | Not started |
-| Decision Log | **Live** |
+| **Data Export** (Accounts + Active Requests, one Excel file) | **Live — this is v1** |
+| Account Truth (Contracted / Enabled / Used, one account at a time) | Live but shelved from nav — reachable at `/accounts` |
+| Decision Log | Live but shelved from nav — reachable at `/decisions` |
+| Request Queue (scored, HubSpot + Jira) | Shelved — needs Jira/Atlassian connector access |
+| Pod Capacity / One-Pagers / Finance Reconciliation | Shelved — not started |
 
-Account Truth's Contracted column will return deals with **empty line items**
-until the shared HubSpot private app token gets the `crm.objects.line_items.read`
-and `crm.schemas.line_items.read` scopes added (alis-hub hit this same wall
-2026-09-03 and disabled the column rather than ship it broken). Add the scopes,
-regenerate the token, done — no code change needed on this side.
+Both Data Export and Account Truth pull deal/line-item data that will come back
+**scope-blocked** until the shared HubSpot private app token gets the
+`crm.objects.line_items.read` and `crm.schemas.line_items.read` scopes added
+(alis-hub hit this same wall 2026-09-03). Deal-level info (name, ARR, close date)
+already works without it. The ticket side of Data Export (Active Requests) needs no
+extra scopes and is fully live today.
 
 ## Setup
 

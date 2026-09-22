@@ -78,4 +78,60 @@ function hubspotRecordUrl(objectType, id) {
   return portalId && id != null ? `https://app.hubspot.com/contacts/${portalId}/record/${HUBSPOT_OBJECT_TYPE[objectType]}/${id}` : null;
 }
 
-module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE };
+// `pipeline`/`dealstage` and `hs_pipeline`/`hs_pipeline_stage` come back
+// from the API as opaque internal IDs, not the label shown in the HubSpot
+// UI — this resolves them, for whichever object type is asked for. Cached
+// for the process lifetime (pipeline config rarely changes). Ported from
+// alis-hub's server/services/hubspotTickets.js.
+const pipelineStageLabelCachePromises = new Map();
+async function getPipelineStageLabels(objectType) {
+  if (!pipelineStageLabelCachePromises.has(objectType)) {
+    pipelineStageLabelCachePromises.set(objectType, (async () => {
+      const { status, body } = await hubspotRequest('GET', `/crm/v3/pipelines/${objectType}`);
+      if (status !== 200) {
+        throw new Error(`HubSpot ${objectType} pipelines lookup failed (${status}): ${JSON.stringify(body)}`);
+      }
+      const labels = new Map();
+      for (const pipeline of body.results || []) {
+        for (const stage of pipeline.stages || []) {
+          labels.set(`${pipeline.id}:${stage.id}`, { pipeline: pipeline.label, stage: stage.label });
+        }
+      }
+      return labels;
+    })().catch((err) => {
+      pipelineStageLabelCachePromises.delete(objectType);
+      throw err;
+    }));
+  }
+  return pipelineStageLabelCachePromises.get(objectType);
+}
+
+/** Company IDs associated with a batch of tickets, via the v4 batch associations endpoint — one call per <=100 tickets instead of one call per ticket. Returns a Map<ticketId, companyId[]>. */
+async function batchGetCompanyIdsForTickets(ticketIds) {
+  const result = new Map();
+  for (const batch of chunk(ticketIds, 100)) {
+    const { status, body } = await hubspotRequest('POST', '/crm/v4/associations/tickets/companies/batch/read', {
+      inputs: batch.map((id) => ({ id })),
+    });
+    // HubSpot's v4 batch associations endpoint returns 207 (Multi-Status)
+    // even on full success — confirmed live 2026-09-21 (body.status
+    // "COMPLETE", every input resolved). Only a body.status other than
+    // COMPLETE (or a non-2xx) means something actually went wrong.
+    if (status >= 300 || (body.status && body.status !== 'COMPLETE')) {
+      throw new Error(`HubSpot ticket->company batch associations failed (${status}): ${JSON.stringify(body)}`);
+    }
+    for (const entry of body.results || []) {
+      const ticketId = entry.from?.id;
+      // toObjectId comes back as a raw JSON number (confirmed live
+      // 2026-09-21), while every company ID elsewhere in this app (from
+      // the v3 search/batch-read endpoints) is a string — stringify here
+      // so callers can key a Map by company ID without every lookup
+      // silently missing on a type mismatch.
+      const companyIds = (entry.to || []).map((t) => String(t.toObjectId ?? t.id));
+      if (ticketId) result.set(ticketId, companyIds);
+    }
+  }
+  return result;
+}
+
+module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE, getPipelineStageLabels, batchGetCompanyIdsForTickets };

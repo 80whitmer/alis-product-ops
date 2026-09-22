@@ -1,13 +1,17 @@
 import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
-  { to: '/queue', label: 'Request Queue', status: 'blocked' },
+  { to: '/export', label: 'Data Export', status: 'live' },
   { to: '/accounts', label: 'Account Truth', status: 'live' },
-  { to: '/pods', label: 'Pod Capacity', status: 'planned' },
-  { to: '/one-pagers', label: 'One-Pagers', status: 'planned' },
-  { to: '/finance', label: 'Finance Reconciliation', status: 'planned' },
   { to: '/decisions', label: 'Decision Log', status: 'live' },
 ];
+
+// Shelved for now (2026-09-21 pivot to "just serve up the data") — the
+// routes are still registered in App.jsx and reachable by URL, just not in
+// this nav while the simpler export is the lead experience. See
+// docs/CONTEXT.md. Not rendered; kept here as the record of what moved out.
+// /queue (Request Queue, blocked), /pods (Pod Capacity, planned),
+// /one-pagers (One-Pagers, planned), /finance (Finance Reconciliation, planned)
 
 export default function NavShell({ children }) {
   return (
