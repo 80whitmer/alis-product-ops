@@ -1,0 +1,19 @@
+{
+  "name": "alis-product-ops",
+  "version": "0.1.0",
+  "description": "Evidence-driven product/BI decision platform for the ALIS org — request-queue scoring, account contract truth, pod capacity, and a durable decision log. Forked from alis-hub's scaffolding, aimed at a different audience and decision.",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
+    "start": "npm run start --workspace=server",
+    "build": "npm run build --workspace=client",
+    "setup:env": "copy .env.example server\\.env && echo Created server\\.env — fill in your credentials"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
