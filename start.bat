@@ -16,13 +16,12 @@ if errorlevel 1 (
 
 if not exist "server\.env" (
     echo.
-    echo First-time setup - two quick questions, then this is remembered for next time.
+    echo First-time setup - one quick question, then this is remembered for next time.
     echo.
     set /p HUBSPOT_TOKEN="HubSpot Private App Token (from Aaron): "
-    set /p HUBSPOT_PORTAL="HubSpot Portal ID (ask Aaron, or press Enter to skip): "
     (
         echo HUBSPOT_PRIVATE_APP_TOKEN=!HUBSPOT_TOKEN!
-        echo HUBSPOT_PORTAL_ID=!HUBSPOT_PORTAL!
+        echo HUBSPOT_PORTAL_ID=5340932
         echo PORT=3100
     ) > server\.env
     echo.
