@@ -19,7 +19,7 @@
  */
 const { newPage, ensureLoggedIn } = require('../automation/playwright/browser');
 const { captureEntitlements } = require('../automation/playwright/entitlementsPage');
-const { groupEntitlements } = require('./entitlementCategories');
+const { groupEntitlements, categorize } = require('./entitlementCategories');
 
 /** "resident_compliance_entitlement_8" -> "Resident Compliance" — strips the "_entitlement_<id>" suffix and title-cases the rest. */
 function humanizeFlagId(flagId) {
@@ -63,4 +63,40 @@ async function getLiveEntitlements(alisAdminCompanyId, hubspotProducts) {
   }
 }
 
-module.exports = { getLiveEntitlements, humanizeFlagId };
+/**
+ * Portfolio-wide version for the "Run portfolio entitlement check" job
+ * (server/services/portfolioEntitlementsJob.js) — every account with an
+ * ALIS Admin Company ID on file, ONE browser context/login reused across
+ * all of them (unlike getLiveEntitlements' per-call context) since logging
+ * in fresh per account would dominate the run time at portfolio scale.
+ * `accounts` is [{ hubspotCompanyId, companyName, alisAdminCompanyId }];
+ * a bad/stale id fails that one account (reported via `onProgress`'s
+ * `error`) without aborting the run. `onSnapshot(hubspotCompanyId,
+ * companyName, flags)` is called after each successful scrape so the
+ * caller can persist incrementally rather than holding everything in
+ * memory until the whole run finishes.
+ */
+async function getLiveEntitlementsBulk(accounts, { onProgress, onSnapshot } = {}) {
+  const page = await newPage();
+  try {
+    await ensureLoggedIn(page);
+    for (let i = 0; i < accounts.length; i++) {
+      const a = accounts[i];
+      onProgress?.({ index: i, total: accounts.length, companyName: a.companyName, status: 'running' });
+      try {
+        const capture = await captureEntitlements(page, a.alisAdminCompanyId);
+        const flags = Object.entries(capture.flags).map(([id, enabled]) => ({
+          id, label: humanizeFlagId(id), category: categorize(id), enabled,
+        }));
+        await onSnapshot?.(a.hubspotCompanyId, a.companyName, flags);
+        onProgress?.({ index: i, total: accounts.length, companyName: a.companyName, status: 'done' });
+      } catch (err) {
+        onProgress?.({ index: i, total: accounts.length, companyName: a.companyName, status: 'error', error: err.message });
+      }
+    }
+  } finally {
+    await page.context().close();
+  }
+}
+
+module.exports = { getLiveEntitlements, getLiveEntitlementsBulk, humanizeFlagId };

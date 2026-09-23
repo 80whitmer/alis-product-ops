@@ -9,6 +9,7 @@ import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 import OnboardingSection from '../components/OnboardingSection.jsx';
 import KeyContactsSection from '../components/KeyContactsSection.jsx';
+import PortfolioEntitlementsSection from '../components/PortfolioEntitlementsSection.jsx';
 import { CategoryMixSection, ModuleSection } from '../components/CategoryCharts.jsx';
 import PinnedNoteBody from '../components/PinnedNote.jsx';
 
@@ -24,7 +25,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 // conventions"), alphabetized at build time like theirs so a new section
 // can't drift out of order.
 const OVERVIEW_SECTIONS = [
-  { category: 'Accounts', items: ['Accounts', 'Key Contacts', 'Onboarding', 'Portfolio KPIs'].sort((a, b) => a.localeCompare(b)) },
+  { category: 'Accounts', items: ['Accounts', 'Key Contacts', 'Onboarding', 'Portfolio Entitlements', 'Portfolio KPIs'].sort((a, b) => a.localeCompare(b)) },
   { category: 'Tickets', items: ['Enhancement Requests', 'Enhancement Requests: Top 3', 'Tickets by Category Closed', 'Tickets by Category Open', 'Tickets by Module', 'Tickets: Escalation'].sort((a, b) => a.localeCompare(b)) },
 ];
 
@@ -603,6 +604,14 @@ export default function Dashboard() {
             defaultExpanded={false}
           >
             <KeyContactsSection companies={data.companies} onExport={(rows) => exportKeyContactsToExcel(rows, data.generatedAt)} />
+          </SectionCard>
+
+          <SectionCard
+            title="Portfolio Entitlements"
+            description="What percentage of live ALIS environments have each entitlement turned on — a manual, on-demand check (not part of the regular Refresh) across every account with an ALIS Admin Company ID on file."
+            defaultExpanded={false}
+          >
+            <PortfolioEntitlementsSection companies={data.companies} alisAdminIdCount={data.companies.filter((c) => c.alisAdminCompanyId).length} />
           </SectionCard>
 
           <SectionCard

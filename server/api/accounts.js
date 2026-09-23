@@ -4,9 +4,10 @@ const { getContractedModulesForCompany } = require('../services/hubspotDeals');
 const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
 const { discoverAlisAdminIds } = require('../services/alisCompanyDiscovery');
+const { startPortfolioEntitlementsCheck, getStatus: getPortfolioEntitlementsStatus, getPortfolioEntitlementRollup } = require('../services/portfolioEntitlementsJob');
 const {
   getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
-  setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
+  setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, listAlisAdminIds,
 } = require('../db/database');
 
 // The portfolio-wide company list used to live at GET /api/accounts, but it
@@ -156,6 +157,45 @@ router.get('/:id/live-entitlements', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// POST /api/accounts/portfolio-entitlements/run — kicks off a portfolio-
+// wide live entitlements scrape (server/services/portfolioEntitlementsJob.js),
+// one account at a time, over every account with an ALIS Admin Company ID
+// on file. Deliberately manual/separate from the normal Refresh (Aaron,
+// Sep 2026) — a real ALIS admin login+scrape per account is slow, and this
+// hits production on purpose only when asked. `companies` (name lookup)
+// comes from the client's already-loaded portfolio, same as discover/
+// live-entitlements above. 202 + poll /status rather than blocking the
+// request for what could be a very long run.
+router.post('/portfolio-entitlements/run', (req, res) => {
+  const companies = req.body?.companies;
+  if (!Array.isArray(companies)) {
+    return res.status(400).json({ error: 'Expected { companies: [{ id, name }] }' });
+  }
+  const nameById = new Map(companies.map((c) => [c.id, c.name]));
+  const accounts = listAlisAdminIds().map((r) => ({
+    hubspotCompanyId: r.hubspot_company_id,
+    companyName: nameById.get(r.hubspot_company_id) || null,
+    alisAdminCompanyId: r.alis_admin_company_id,
+  }));
+  if (accounts.length === 0) {
+    return res.status(400).json({ error: 'No accounts have an ALIS Admin Company ID on file yet.' });
+  }
+  const started = startPortfolioEntitlementsCheck(accounts);
+  if (!started) {
+    return res.status(409).json({ error: 'A portfolio entitlement check is already running.' });
+  }
+  res.status(202).json({ started: true, total: accounts.length });
+});
+
+// GET /api/accounts/portfolio-entitlements/status — job progress plus the
+// current %-enabled-per-flag rollup computed from whatever's been captured
+// so far (so results are visible mid-run, not just after it finishes, and
+// persist across page reloads since they're read from the DB, not job
+// memory).
+router.get('/portfolio-entitlements/status', (req, res) => {
+  res.json({ job: getPortfolioEntitlementsStatus(), rollup: getPortfolioEntitlementRollup() });
 });
 
 module.exports = router;

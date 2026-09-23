@@ -100,6 +100,27 @@ async function initDb() {
     );
   `);
 
+  // Latest live ALIS admin entitlement flag state per account, from the
+  // portfolio-wide "Run portfolio entitlement check" job (Aaron, Sep 2026:
+  // "a callout of what percentage of alis live environments have those
+  // specific entitlements enabled"). One row per {company, flag}, upserted
+  // each run — a snapshot, not a history, since the % callout is a current
+  // state question, not a trend. category rides along pre-computed
+  // (server/services/entitlementCategories.js) so the rollup query never
+  // needs to re-run the keyword matcher.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS entitlement_snapshots (
+      hubspot_company_id TEXT NOT NULL,
+      company_name        TEXT,
+      flag_id              TEXT NOT NULL,
+      label                 TEXT,
+      category              TEXT,
+      enabled               INTEGER NOT NULL,
+      captured_at           TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (hubspot_company_id, flag_id)
+    );
+  `);
+
   return db;
 }
 
@@ -223,6 +244,29 @@ function deleteCompanyHost(hubspotCompanyId) {
   run('DELETE FROM company_hosts WHERE hubspot_company_id = ?', [hubspotCompanyId]);
 }
 
+/** Replaces one company's whole flag set in one go — a portfolio check re-derives every flag each run, so a stale flag from a company's previous, differently-configured run should disappear rather than linger. */
+function replaceEntitlementSnapshot(hubspotCompanyId, companyName, flags) {
+  db.run('DELETE FROM entitlement_snapshots WHERE hubspot_company_id = ?', [hubspotCompanyId]);
+  for (const f of flags) {
+    db.run(
+      `INSERT INTO entitlement_snapshots (hubspot_company_id, company_name, flag_id, label, category, enabled, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [hubspotCompanyId, companyName || null, f.id, f.label, f.category, f.enabled ? 1 : 0]
+    );
+  }
+  saveToDisk();
+}
+
+/** Every captured flag row, portfolio-wide — the portfolio-entitlements rollup groups/percentages this client-side (in the job-status route) rather than in SQL, same "shape it in JS" convention as this app's other rollups (kpiMetrics.js). */
+function listEntitlementSnapshots() {
+  return queryAll('SELECT hubspot_company_id, company_name, flag_id, label, category, enabled, captured_at FROM entitlement_snapshots');
+}
+
+function countEntitlementSnapshotCompanies() {
+  const rows = queryAll('SELECT COUNT(DISTINCT hubspot_company_id) AS n FROM entitlement_snapshots');
+  return rows[0]?.n ?? 0;
+}
+
 // Allowlisted, not arbitrary — `table` is interpolated directly into SQL below.
 const TABLES_WITH_UPDATED_AT = new Set(['alis_admin_ids', 'company_hosts']);
 
@@ -237,4 +281,5 @@ module.exports = {
   initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory,
   listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
   listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, getMaxUpdatedAt,
+  replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies,
 };

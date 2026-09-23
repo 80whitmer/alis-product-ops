@@ -19,6 +19,9 @@ export const setAlisAdminId = (id, alisAdminCompanyId, companyName) =>
 export const importAlisAdminIds = (rows) => request('/accounts/alis-admin-ids/import', { method: 'POST', body: JSON.stringify({ rows }) });
 export const discoverAlisAdminIds = (companies) =>
   request('/accounts/alis-admin-ids/discover', { method: 'POST', body: JSON.stringify({ companies }) });
+export const runPortfolioEntitlementsCheck = (companies) =>
+  request('/accounts/portfolio-entitlements/run', { method: 'POST', body: JSON.stringify({ companies }) });
+export const getPortfolioEntitlementsStatus = () => request('/accounts/portfolio-entitlements/status');
 export const clearAlisAdminId = (id) => request(`/accounts/${id}/alis-admin-id`, { method: 'DELETE' });
 export const setCompanyHost = (id, companyHost, companyName) =>
   request(`/accounts/${id}/company-host`, { method: 'PUT', body: JSON.stringify({ companyHost, companyName }) });
