@@ -18,8 +18,9 @@ function formatTimestamp(iso) {
 }
 
 export default function AccountTruth() {
-  const { accounts: accountsState, refreshAccounts, ensureAccountsLoaded, patchAccountsList, markUpdated } = useDataCache();
-  const { list: accounts, loading: accountsLoading, error: loadError, lastRefreshedAt, alisAdminIdsUpdatedAt, companyHostsUpdatedAt } = accountsState;
+  const { dashboard, refreshDashboard, ensureDashboardLoaded, patchCompany, markUpdated } = useDataCache();
+  const accounts = dashboard.data?.companies || [];
+  const { loading: accountsLoading, error: loadError, lastRefreshedAt, alisAdminIdsUpdatedAt, companyHostsUpdatedAt } = dashboard;
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [truth, setTruth] = useState(null);
@@ -44,15 +45,13 @@ export default function AccountTruth() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState(null);
 
-  // Loads once per app session (cached in DataCache.jsx) rather than on
-  // every visit to this page — Aaron, Sep 2026: same "manual refresh,
-  // cached across screens" ask as the Dashboard. This route runs the same
-  // expensive portfolio-wide ticket-history pull /api/export does (for the
-  // Enhancement Request counts), so re-running it on every navigation was
-  // exactly as costly and exactly as unnecessary.
+  // Shares the Dashboard's own cache (client/src/DataCache.jsx) rather than
+  // running its own separate fetch — Aaron, Sep 2026: "Can Account Truth
+  // also refresh and cache when Dashboard refreshes?" Both pages now read
+  // the same companies list, so a Refresh on either one updates both.
   useEffect(() => {
-    ensureAccountsLoaded();
-  }, [ensureAccountsLoaded]);
+    ensureDashboardLoaded();
+  }, [ensureDashboardLoaded]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -98,12 +97,12 @@ export default function AccountTruth() {
 
   /** Merges a fresh alisAdminCompanyId onto one account, in both the cached list and (if it's the current one) the selected detail — avoids a full refetch after a save. */
   function applyAlisAdminId(hubspotCompanyId, alisAdminCompanyId) {
-    patchAccountsList((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, alisAdminCompanyId } : a)));
+    patchCompany(hubspotCompanyId, { alisAdminCompanyId });
     setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, alisAdminCompanyId } : prev));
   }
 
   function applyCompanyHost(hubspotCompanyId, companyHost) {
-    patchAccountsList((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, companyHost } : a)));
+    patchCompany(hubspotCompanyId, { companyHost });
     setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, companyHost } : prev));
   }
 
@@ -252,7 +251,7 @@ export default function AccountTruth() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
           <div>
-            <button className="secondary" onClick={refreshAccounts} disabled={accountsLoading} style={{ marginRight: 8 }}>
+            <button className="secondary" onClick={refreshDashboard} disabled={accountsLoading} style={{ marginRight: 8 }}>
               {accountsLoading ? 'Refreshing…' : 'Refresh'}
             </button>
             {lastRefreshedAt && <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Last refreshed {formatTimestamp(lastRefreshedAt)}</span>}

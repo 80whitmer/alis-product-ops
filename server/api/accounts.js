@@ -1,44 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getContractedModulesForCompany } = require('../services/hubspotDeals');
 const { getKeyContactsForCompany } = require('../services/hubspotContacts');
-const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
 const {
-  listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
-  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, getMaxUpdatedAt,
+  getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
+  setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
 } = require('../db/database');
 
-// GET /api/accounts — portfolio-wide, no owner scoping. Same
-// open/closed Enhancement Request counts as the Dashboard's Accounts
-// table (server/api/export.js) — this is the same portfolio-wide ticket
-// pull, so the page costs the same ~1-2 minutes that one does rather than
-// staying a fast company-only load, but the two lists would otherwise
-// silently disagree on these two columns.
-router.get('/', async (req, res, next) => {
-  try {
-    const rawCompanies = await getAllHomeOfficeCompanies();
-    const companiesById = new Map(rawCompanies.map((c) => [c.id, c]));
-    const ticketHistory = await getTicketHistory({ lookbackDays: 400, companiesById });
-    let companies = withEnhancementCounts(rawCompanies, ticketHistory);
-    const alisAdminIdByCompany = new Map(listAlisAdminIds().map((r) => [r.hubspot_company_id, r.alis_admin_company_id]));
-    const companyHostByCompany = new Map(listCompanyHosts().map((r) => [r.hubspot_company_id, r.company_host]));
-    companies = companies.map((c) => ({
-      ...c,
-      alisAdminCompanyId: alisAdminIdByCompany.get(c.id) || null,
-      companyHost: companyHostByCompany.get(c.id) || null,
-    }));
-    res.json({
-      companies,
-      generatedAt: new Date().toISOString(),
-      alisAdminIdsUpdatedAt: getMaxUpdatedAt('alis_admin_ids'),
-      companyHostsUpdatedAt: getMaxUpdatedAt('company_hosts'),
-    });
-  } catch (err) {
-    next(err);
-  }
-});
+// The portfolio-wide company list used to live at GET /api/accounts, but it
+// duplicated /api/export's own equally-expensive company+ticket-history
+// pull (confirmed live, Sep 2026: refreshing one page never updated the
+// other's cache, and Aaron asked for them to move together) — Account
+// Truth now reads companies straight from the shared DataCache the
+// Dashboard already populates (client/src/DataCache.jsx) instead of
+// fetching its own copy. Every per-account route below is unaffected.
 
 // GET /api/accounts/:id/contract-truth
 // "Contracted" side of the usage-audit RAG grid, live (no cache). Enabled

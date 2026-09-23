@@ -4,7 +4,18 @@ const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 const { getDealSummaryByCompany } = require('../services/hubspotDealsSummary');
 const { computeTierSnapshotRows } = require('../services/kpiMetrics');
-const { recordKpiMetricSnapshots } = require('../db/database');
+const { recordKpiMetricSnapshots, listAlisAdminIds, listCompanyHosts, getMaxUpdatedAt } = require('../db/database');
+
+/** Merges the manually-entered ALIS Admin Company ID / Subdomain mappings onto each company — the same fields Account Truth needs, folded into this one shared portfolio pull instead of AccountTruth.jsx running its own separate (and equally expensive) copy of it. */
+function withAlisMappings(companies) {
+  const alisAdminIdByCompany = new Map(listAlisAdminIds().map((r) => [r.hubspot_company_id, r.alis_admin_company_id]));
+  const companyHostByCompany = new Map(listCompanyHosts().map((r) => [r.hubspot_company_id, r.company_host]));
+  return companies.map((c) => ({
+    ...c,
+    alisAdminCompanyId: alisAdminIdByCompany.get(c.id) || null,
+    companyHost: companyHostByCompany.get(c.id) || null,
+  }));
+}
 
 /** Merges the deal roll-up onto each company — zero deals is a real, common state (most of the portfolio has none open), not missing data, so it defaults to 0s rather than null. */
 function withDealSummary(companies, dealSummaryByCompany) {
@@ -40,6 +51,7 @@ router.get('/', async (req, res, next) => {
     const companiesById = new Map(companies.map((c) => [c.id, c]));
     const requests = await getTicketHistory({ lookbackDays: 400, companiesById });
     companies = withEnhancementCounts(companies, requests);
+    companies = withAlisMappings(companies);
 
     // Captures today's ARR/company/community-by-tier snapshot as a side
     // effect of this same load — the "tracking and trending" on the
@@ -51,7 +63,14 @@ router.get('/', async (req, res, next) => {
     const kpiSnapshot = computeTierSnapshotRows(companies);
     recordKpiMetricSnapshots(kpiSnapshot.rows);
 
-    res.json({ generatedAt: new Date().toISOString(), companies, requests, kpi: kpiSnapshot.current });
+    res.json({
+      generatedAt: new Date().toISOString(),
+      companies,
+      requests,
+      kpi: kpiSnapshot.current,
+      alisAdminIdsUpdatedAt: getMaxUpdatedAt('alis_admin_ids'),
+      companyHostsUpdatedAt: getMaxUpdatedAt('company_hosts'),
+    });
   } catch (err) {
     next(err);
   }
