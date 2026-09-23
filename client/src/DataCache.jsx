@@ -24,7 +24,7 @@ import { getExportData, getKpiHistory } from './api.js';
  */
 const DataCacheContext = createContext(null);
 
-const EMPTY_KPI_HISTORY = { tier: [], portfolio: [], arrBand: [] };
+const EMPTY_KPI_HISTORY = { tier: [], am: [], portfolio: [], arrBand: [] };
 
 export function DataCacheProvider({ children }) {
   const [dashboard, setDashboard] = useState({

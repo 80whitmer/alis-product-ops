@@ -22,6 +22,85 @@ function computeMonthlyTimeline(decisions) {
   }));
 }
 
+const HEATMAP_WEEKS = 53;
+const HEATMAP_COLOR_SCALE = ['#ebedf0', '#c6dcf5', '#8bbcec', '#4f92dd', '#2563eb'];
+
+function heatLevel(count, max) {
+  if (!count) return 0;
+  if (max <= 1) return count > 0 ? 4 : 0;
+  const ratio = count / max;
+  if (ratio > 0.75) return 4;
+  if (ratio > 0.5) return 3;
+  if (ratio > 0.25) return 2;
+  return 1;
+}
+
+/** GitHub-style contribution heatmap of decided_at dates, trailing 53 weeks — Aaron, Sep 2026: "add a github style heat map to the decision reporting." Same plain-CSS-grid pattern as the ticket/enhancement heatmaps on the Dashboard (client/src/components/TicketCharts.jsx), duplicated rather than shared per this codebase's per-file convention. */
+function DecisionHeatmap({ decisions }) {
+  const { cells, monthLabels } = useMemo(() => {
+    const countByDate = {};
+    for (const d of decisions) {
+      if (!d.decided_at) continue;
+      const day = d.decided_at.slice(0, 10);
+      countByDate[day] = (countByDate[day] || 0) + 1;
+    }
+    const max = Math.max(0, ...Object.values(countByDate));
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()));
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - (HEATMAP_WEEKS * 7 - 1));
+
+    const days = [];
+    const monthLabels = [];
+    let lastMonth = null;
+    for (let i = 0, d = new Date(start); d <= end; i++, d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      const cnt = countByDate[iso] || 0;
+      const inFuture = d > today;
+      days.push({ iso, count: inFuture ? null : cnt, level: inFuture ? null : heatLevel(cnt, max) });
+      const week = Math.floor(i / 7);
+      const month = d.getUTCMonth();
+      if (d.getUTCDay() === 0 && month !== lastMonth) {
+        monthLabels.push({ week, label: d.toLocaleDateString('en-US', { month: 'short' }) });
+        lastMonth = month;
+      }
+    }
+    return { cells: days, monthLabels };
+  }, [decisions]);
+
+  const hasAny = decisions.some((d) => d.decided_at);
+  if (!hasAny) {
+    return <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>No dated decisions to map yet.</p>;
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ minWidth: HEATMAP_WEEKS * 13, position: 'relative', height: 14, marginBottom: 4 }}>
+        {monthLabels.map(({ week, label }) => (
+          <span key={`${week}-${label}`} style={{ position: 'absolute', left: week * 13, fontSize: 11, color: 'var(--ink-soft)' }}>{label}</span>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, 11px)', gridAutoFlow: 'column', gridAutoColumns: '11px', gap: 2, minWidth: HEATMAP_WEEKS * 13 }}>
+        {cells.map((c) => (
+          <div
+            key={c.iso}
+            title={c.count == null ? '' : `${c.iso}: ${c.count} decision${c.count === 1 ? '' : 's'}`}
+            style={{ width: 11, height: 11, borderRadius: 2, background: c.level == null ? 'transparent' : HEATMAP_COLOR_SCALE[c.level] }}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 8, fontSize: 11, color: 'var(--ink-soft)' }}>
+        <span>Fewer</span>
+        {HEATMAP_COLOR_SCALE.map((color, i) => <span key={i} style={{ width: 11, height: 11, borderRadius: 2, background: color, display: 'inline-block' }} />)}
+        <span>More</span>
+      </div>
+    </div>
+  );
+}
+
 function DecisionTimeline({ decisions }) {
   const rows = useMemo(() => computeMonthlyTimeline(decisions), [decisions]);
   if (decisions.length === 0) {
@@ -137,6 +216,8 @@ export default function DecisionLog() {
         </div>
         <h3 style={{ marginTop: 0, fontSize: 14 }}>Decisions Captured — Trailing 12 Months</h3>
         <DecisionTimeline decisions={decisions} />
+        <h3 style={{ fontSize: 14, marginTop: 24, marginBottom: 10 }}>Decisions Captured — Daily</h3>
+        <DecisionHeatmap decisions={decisions} />
       </div>
 
       <div className="card">

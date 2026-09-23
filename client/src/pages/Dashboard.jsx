@@ -5,7 +5,8 @@ import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from 
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
-import { KpiTierSection, ArrBandSection, count as formatCount } from '../components/KpiCharts.jsx';
+import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_COLOR, count as formatCount } from '../components/KpiCharts.jsx';
+import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -372,6 +373,7 @@ export default function Dashboard() {
   const { data, loading, error, kpiHistory } = dashboard;
   const [exporting, setExporting] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
+  const [accountTierFilter, setAccountTierFilter] = useState(null);
   const [accountSort, setAccountSort] = useState({ key: null, dir: 'asc' });
   const [expandedAccountId, setExpandedAccountId] = useState(null);
   const [contactsByAccount, setContactsByAccount] = useState({});
@@ -418,7 +420,7 @@ export default function Dashboard() {
     }
   }
 
-  const filteredAccounts = useMemo(() => {
+  const searchFilteredAccounts = useMemo(() => {
     if (!data) return [];
     const q = accountSearch.trim().toLowerCase();
     if (!q) return data.companies;
@@ -426,6 +428,11 @@ export default function Dashboard() {
       a.name?.toLowerCase().includes(q) || a.accountManagerName?.toLowerCase().includes(q)
     );
   }, [data, accountSearch]);
+
+  const filteredAccounts = useMemo(
+    () => filterByTier(searchFilteredAccounts, accountTierFilter),
+    [searchFilteredAccounts, accountTierFilter]
+  );
 
   const sortedAccounts = useMemo(() => {
     if (!accountSort.key) return filteredAccounts;
@@ -467,6 +474,17 @@ export default function Dashboard() {
   );
   const closedEnhancementRequests = useMemo(
     () => (data ? data.requests.filter((r) => !r.isOpen && r.isEnhancementRequest) : []),
+    [data]
+  );
+  // AM names present in the current snapshot, sorted by ARR desc (busiest
+  // book first) — a fixed order so the "by AM" bar charts don't reshuffle
+  // as data.kpi.byAm's own key insertion order shifts between refreshes.
+  const amKeysByArr = useMemo(() => {
+    const byAm = data?.kpi?.byAm || {};
+    return Object.keys(byAm).sort((a, b) => (byAm[b]?.arrCents || 0) - (byAm[a]?.arrCents || 0));
+  }, [data]);
+  const unassignedCompanies = useMemo(
+    () => (data ? data.companies.filter((c) => c.tier == null || c.tier === 0) : []),
     [data]
   );
   return (
@@ -525,8 +543,9 @@ export default function Dashboard() {
               placeholder="Search by company or account manager…"
               value={accountSearch}
               onChange={(e) => setAccountSearch(e.target.value)}
-              className="w-full mb-4"
+              className="w-full mb-3"
             />
+            <TierFilterPills accounts={searchFilteredAccounts} tierFilter={accountTierFilter} onChange={setAccountTierFilter} />
             <div className="overflow-x-auto">
               <table>
                 <thead>
@@ -590,6 +609,65 @@ export default function Dashboard() {
               description="Approximation: current community count of accounts created this calendar year — a community added mid-year to an older account isn't counted, since communities don't carry their own add date."
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
+            <AverageMetricSection
+              title="Average ARR per Company by Tier" numeratorKey="arrCents" denominatorKey="companyCount"
+              buckets={data.kpi.byTier} history={kpiHistory.tier} scopeKeys={TIER_ORDER} colorFor={(t) => TIER_COLOR[t]} formatValue={usd}
+            />
+            <AverageMetricSection
+              title="Average ARR per Community by Tier" numeratorKey="arrCents" denominatorKey="communityCount"
+              buckets={data.kpi.byTier} history={kpiHistory.tier} scopeKeys={TIER_ORDER} colorFor={(t) => TIER_COLOR[t]} formatValue={usd}
+            />
+            <AverageMetricSection
+              title="Average Capacity (beds) per Community by Tier" numeratorKey="totalCapacityBeds" denominatorKey="communityCount"
+              description="Average community size, by tier — beds per community, not per company."
+              buckets={data.kpi.byTier} history={kpiHistory.tier} scopeKeys={TIER_ORDER} colorFor={(t) => TIER_COLOR[t]} formatValue={formatCount}
+            />
+            <h3 className="font-semibold text-primary-900 text-sm mt-2 mb-3">By Account Manager</h3>
+            <AverageMetricSection
+              title="Average ARR per Company by AM" numeratorKey="arrCents" denominatorKey="companyCount"
+              buckets={data.kpi.byAm} history={kpiHistory.am} scopeKeys={amKeysByArr} formatValue={usd}
+            />
+            <AverageMetricSection
+              title="Average Capacity (beds) per Community by AM" numeratorKey="totalCapacityBeds" denominatorKey="communityCount"
+              buckets={data.kpi.byAm} history={kpiHistory.am} scopeKeys={amKeysByArr} formatValue={formatCount}
+            />
+
+            <div className="mt-2">
+              <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                <h3 className="font-semibold text-primary-900 text-sm">Unassigned Companies ({unassignedCompanies.length})</h3>
+                <SectionExportButton onExport={() => exportAccountsToExcel(unassignedCompanies, data.generatedAt)} />
+              </div>
+              <p className="text-xs text-neutral-500 mb-3">
+                Accounts with no Client Tier set in HubSpot — mostly newer accounts still in onboarding
+                (confirmed live, Sep 2026: recently-created companies come through from HubSpot with no
+                tier and no ARR yet), not a data-capture gap in this app.
+              </p>
+              {unassignedCompanies.length === 0 ? (
+                <p className="text-sm text-neutral-500 italic">Every account currently has a tier set.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table>
+                    <thead>
+                      <tr><th>Company</th><th>Account Manager</th><th>ARR</th><th>Communities</th><th>Created</th></tr>
+                    </thead>
+                    <tbody>
+                      {unassignedCompanies.slice(0, 50).map((c) => (
+                        <tr key={c.id}>
+                          <td>{c.name}</td>
+                          <td>{c.accountManagerName || '—'}</td>
+                          <td>{usd(c.arrCents)}</td>
+                          <td>{c.communityCount ?? '—'}</td>
+                          <td>{c.createdAt ? c.createdAt.slice(0, 10) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {unassignedCompanies.length > 50 && (
+                    <p className="text-xs text-neutral-400 mt-2">Showing 50 of {unassignedCompanies.length} — export for the full list.</p>
+                  )}
+                </div>
+              )}
+            </div>
           </SectionCard>
 
           <SectionCard

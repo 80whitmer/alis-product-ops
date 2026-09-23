@@ -6,6 +6,7 @@ import {
 import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/alisAdminIdTemplate.js';
 import { exportCompanyHostTemplate, parseCompanyHostTemplate } from '../utils/companyHostTemplate.js';
 import { useDataCache } from '../DataCache.jsx';
+import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 
 function formatCents(cents) {
   if (cents == null) return '—';
@@ -22,6 +23,7 @@ export default function AccountTruth() {
   const accounts = dashboard.data?.companies || [];
   const { loading: accountsLoading, error: loadError, lastRefreshedAt, alisAdminIdsUpdatedAt, companyHostsUpdatedAt } = dashboard;
   const [search, setSearch] = useState('');
+  const [tierFilter, setTierFilter] = useState(null);
   const [selected, setSelected] = useState(null);
   const [truth, setTruth] = useState(null);
   const [truthLoading, setTruthLoading] = useState(false);
@@ -53,11 +55,13 @@ export default function AccountTruth() {
     ensureDashboardLoaded();
   }, [ensureDashboardLoaded]);
 
-  const filtered = useMemo(() => {
+  const searchFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return accounts;
     return accounts.filter((a) => a.name?.toLowerCase().includes(q));
   }, [accounts, search]);
+
+  const filtered = useMemo(() => filterByTier(searchFiltered, tierFilter), [searchFiltered, tierFilter]);
 
   // Starting a new search should clear whatever account was previously
   // selected below — otherwise that account's full detail card (tags,
@@ -303,8 +307,9 @@ export default function AccountTruth() {
           placeholder="Search accounts…"
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
-          style={{ width: '100%', marginBottom: 12 }}
+          style={{ width: '100%', marginBottom: 10 }}
         />
+        <TierFilterPills accounts={searchFiltered} tierFilter={tierFilter} onChange={setTierFilter} />
         {loadError && <div className="notice danger">{loadError}</div>}
         <table>
           <thead>
