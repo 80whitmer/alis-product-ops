@@ -5,7 +5,10 @@ const { getContractedModulesForCompany } = require('../services/hubspotDeals');
 const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
-const { listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId } = require('../db/database');
+const {
+  listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
+  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
+} = require('../db/database');
 
 // GET /api/accounts — portfolio-wide, no owner scoping. Same
 // open/closed Enhancement Request counts as the Dashboard's Accounts
@@ -20,7 +23,12 @@ router.get('/', async (req, res, next) => {
     const ticketHistory = await getTicketHistory({ lookbackDays: 400, companiesById });
     let companies = withEnhancementCounts(rawCompanies, ticketHistory);
     const alisAdminIdByCompany = new Map(listAlisAdminIds().map((r) => [r.hubspot_company_id, r.alis_admin_company_id]));
-    companies = companies.map((c) => ({ ...c, alisAdminCompanyId: alisAdminIdByCompany.get(c.id) || null }));
+    const companyHostByCompany = new Map(listCompanyHosts().map((r) => [r.hubspot_company_id, r.company_host]));
+    companies = companies.map((c) => ({
+      ...c,
+      alisAdminCompanyId: alisAdminIdByCompany.get(c.id) || null,
+      companyHost: companyHostByCompany.get(c.id) || null,
+    }));
     res.json({ companies });
   } catch (err) {
     next(err);
@@ -88,8 +96,40 @@ router.post('/alis-admin-ids/import', (req, res) => {
   if (!Array.isArray(rows)) {
     return res.status(400).json({ error: 'Expected { rows: [{ hubspotCompanyId, companyName, alisAdminCompanyId }] }' });
   }
-  bulkSetAlisAdminIds(rows);
-  res.json({ imported: rows.filter((r) => r.alisAdminCompanyId).length });
+  const imported = bulkSetAlisAdminIds(rows);
+  res.json({ imported });
+});
+
+// PUT /api/accounts/:id/company-host — set/update one account's ALIS
+// subdomain (e.g. "vivaeast" -> vivaeast.alisonline.com). Comma-separate
+// multiple hosts in one string for a multi-instance account, same
+// convention as alis-hub's own company_hosts mapping.
+router.put('/:id/company-host', (req, res) => {
+  const { companyHost, companyName } = req.body || {};
+  if (!companyHost || !String(companyHost).trim()) {
+    return res.status(400).json({ error: 'companyHost is required' });
+  }
+  setCompanyHost({ hubspotCompanyId: req.params.id, companyName, companyHost: String(companyHost).trim() });
+  res.status(204).end();
+});
+
+// DELETE /api/accounts/:id/company-host
+router.delete('/:id/company-host', (req, res) => {
+  deleteCompanyHost(req.params.id);
+  res.status(204).end();
+});
+
+// POST /api/accounts/company-hosts/import — bulk version, for the
+// Download/Upload ALIS Subdomains template (same file format alis-hub's
+// own AccountHealthDashboard produces — its completed templates can be
+// re-uploaded here as-is).
+router.post('/company-hosts/import', (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ error: 'Expected { rows: [{ hubspotCompanyId, companyName, companyHost }] }' });
+  }
+  const imported = bulkSetCompanyHosts(rows);
+  res.json({ imported });
 });
 
 // GET /api/accounts/:id/live-entitlements — logs into ALIS admin and scrapes

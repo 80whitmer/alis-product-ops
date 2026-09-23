@@ -82,6 +82,24 @@ async function initDb() {
     );
   `);
 
+  // A different mapping from alis_admin_ids above: the ALIS *subdomain*
+  // (e.g. "vivaeast" -> vivaeast.alisonline.com), not the numeric admin
+  // Company ID an entitlements check needs. Same "no automated way to
+  // resolve it" story as alis_admin_ids, and same alis-hub precedent
+  // (its own company_hosts table / CompanyHostMappingButtons) — cached
+  // here once imported so re-uploading the same completed template isn't
+  // needed every session. Useful on its own (a direct link to the
+  // account's ALIS instance) and is what the ALIS Export API's per-
+  // subdomain Basic Auth would key off of, if that's ever wired in here.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS company_hosts (
+      hubspot_company_id  TEXT PRIMARY KEY,
+      company_name        TEXT,
+      company_host        TEXT NOT NULL,
+      updated_at          TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   return db;
 }
 
@@ -162,19 +180,51 @@ function setAlisAdminId({ hubspotCompanyId, companyName, alisAdminCompanyId }) {
   );
 }
 
-/** Bulk upsert for the Download/Upload template flow — one row per {hubspotCompanyId, companyName, alisAdminCompanyId}, skipping any row with no ID. */
+/** Bulk upsert for the Download/Upload template flow — one row per {hubspotCompanyId, companyName, alisAdminCompanyId}, skipping any row with no ID or no HubSpot id to key on. */
 function bulkSetAlisAdminIds(rows) {
+  let imported = 0;
   for (const r of rows) {
-    if (!r.alisAdminCompanyId) continue;
+    if (!r.alisAdminCompanyId || !r.hubspotCompanyId) continue;
     setAlisAdminId(r);
+    imported += 1;
   }
+  return imported;
 }
 
 function deleteAlisAdminId(hubspotCompanyId) {
   run('DELETE FROM alis_admin_ids WHERE hubspot_company_id = ?', [hubspotCompanyId]);
 }
 
+function listCompanyHosts() {
+  return queryAll('SELECT hubspot_company_id, company_host FROM company_hosts');
+}
+
+function setCompanyHost({ hubspotCompanyId, companyName, companyHost }) {
+  run(
+    `INSERT INTO company_hosts (hubspot_company_id, company_name, company_host, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(hubspot_company_id) DO UPDATE SET company_name = excluded.company_name, company_host = excluded.company_host, updated_at = excluded.updated_at`,
+    [hubspotCompanyId, companyName || null, companyHost]
+  );
+}
+
+/** Bulk upsert for the Download/Upload template flow — skips any row with no host filled in, no HubSpot ID (name-only rows from an admin-directory scrape, which this app doesn't have, would otherwise have nothing to key on), or a name that doesn't resolve to a real ID. */
+function bulkSetCompanyHosts(rows) {
+  let imported = 0;
+  for (const r of rows) {
+    if (!r.companyHost || !r.hubspotCompanyId) continue;
+    setCompanyHost(r);
+    imported += 1;
+  }
+  return imported;
+}
+
+function deleteCompanyHost(hubspotCompanyId) {
+  run('DELETE FROM company_hosts WHERE hubspot_company_id = ?', [hubspotCompanyId]);
+}
+
 module.exports = {
   initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory,
   listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
+  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
 };

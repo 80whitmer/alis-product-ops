@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getAccounts, getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements } from '../api.js';
+import {
+  getAccounts, getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements,
+  setCompanyHost, importCompanyHosts, clearCompanyHost,
+} from '../api.js';
 import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/alisAdminIdTemplate.js';
+import { exportCompanyHostTemplate, parseCompanyHostTemplate } from '../utils/companyHostTemplate.js';
 
 function formatCents(cents) {
   if (cents == null) return '—';
@@ -23,6 +27,13 @@ export default function AccountTruth() {
   const [alisIdInput, setAlisIdInput] = useState('');
   const [savingAlisId, setSavingAlisId] = useState(false);
   const [alisIdError, setAlisIdError] = useState(null);
+  const [importingHosts, setImportingHosts] = useState(false);
+  const [importHostsResult, setImportHostsResult] = useState(null);
+  const [importHostsError, setImportHostsError] = useState(null);
+  const [editingHost, setEditingHost] = useState(false);
+  const [hostInput, setHostInput] = useState('');
+  const [savingHost, setSavingHost] = useState(false);
+  const [hostError, setHostError] = useState(null);
   const [liveEntitlements, setLiveEntitlements] = useState(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState(null);
@@ -58,6 +69,7 @@ export default function AccountTruth() {
     setEditingAlisId(false);
     setLiveEntitlements(null);
     setLiveError(null);
+    setEditingHost(false);
   }
 
   function selectAccount(account) {
@@ -70,6 +82,9 @@ export default function AccountTruth() {
     setAlisIdError(null);
     setLiveEntitlements(null);
     setLiveError(null);
+    setEditingHost(false);
+    setHostInput(account.companyHost || '');
+    setHostError(null);
     getContractTruth(account.id)
       .then(setTruth)
       .catch((err) => setTruthError(err.message))
@@ -80,6 +95,11 @@ export default function AccountTruth() {
   function applyAlisAdminId(hubspotCompanyId, alisAdminCompanyId) {
     setAccounts((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, alisAdminCompanyId } : a)));
     setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, alisAdminCompanyId } : prev));
+  }
+
+  function applyCompanyHost(hubspotCompanyId, companyHost) {
+    setAccounts((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, companyHost } : a)));
+    setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, companyHost } : prev));
   }
 
   async function handleSaveAlisId() {
@@ -151,6 +171,60 @@ export default function AccountTruth() {
     }
   }
 
+  async function handleSaveHost() {
+    const value = hostInput.trim();
+    if (!value) return;
+    setSavingHost(true);
+    setHostError(null);
+    try {
+      await setCompanyHost(selected.id, value, selected.name);
+      applyCompanyHost(selected.id, value);
+      setEditingHost(false);
+    } catch (err) {
+      setHostError(err.message);
+    } finally {
+      setSavingHost(false);
+    }
+  }
+
+  async function handleClearHost() {
+    setSavingHost(true);
+    setHostError(null);
+    try {
+      await clearCompanyHost(selected.id);
+      applyCompanyHost(selected.id, null);
+      setHostInput('');
+    } catch (err) {
+      setHostError(err.message);
+    } finally {
+      setSavingHost(false);
+    }
+  }
+
+  async function handleDownloadHostTemplate() {
+    await exportCompanyHostTemplate(accounts);
+  }
+
+  async function handleUploadHostTemplate(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingHosts(true);
+    setImportHostsError(null);
+    setImportHostsResult(null);
+    try {
+      const rows = await parseCompanyHostTemplate(file);
+      if (rows.length === 0) throw new Error('No rows with an ALIS Subdomain filled in were found in this file.');
+      const res = await importCompanyHosts(rows);
+      for (const r of rows) if (r.hubspotCompanyId) applyCompanyHost(r.hubspotCompanyId, r.companyHost);
+      setImportHostsResult(`Imported ${res.imported} ALIS subdomain${res.imported === 1 ? '' : 's'} (${rows.length - res.imported} row${rows.length - res.imported === 1 ? '' : 's'} had no matching HubSpot Company ID and were skipped).`);
+    } catch (err) {
+      setImportHostsError(err.message);
+    } finally {
+      setImportingHosts(false);
+    }
+  }
+
   return (
     <>
       <div className="page-head">
@@ -189,6 +263,23 @@ export default function AccountTruth() {
               {importResult && <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{importResult}</span>}
             </div>
             {importError && <div className="notice danger">{importError}</div>}
+
+            <hr style={{ border: 'none', borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+
+            <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: 0 }}>
+              ALIS Subdomains — e.g. "vivaeast" for vivaeast.alisonline.com. Same file format as
+              alis-hub's own ALIS Subdomains template, so an already-completed one can be
+              uploaded here as-is.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="secondary" onClick={handleDownloadHostTemplate}>📋 Download Template</button>
+              <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
+                {importingHosts ? 'Importing…' : '📤 Upload Completed Template'}
+                <input type="file" accept=".xlsx" onChange={handleUploadHostTemplate} disabled={importingHosts} style={{ display: 'none' }} />
+              </label>
+              {importHostsResult && <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{importHostsResult}</span>}
+            </div>
+            {importHostsError && <div className="notice danger">{importHostsError}</div>}
           </div>
         )}
 
@@ -252,6 +343,34 @@ export default function AccountTruth() {
             ) : (
               <p style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No products recorded in HubSpot for this account.</p>
             )}
+          </div>
+
+          <div style={{ marginBottom: 16, fontSize: 12.5 }}>
+            {!editingHost && selected.companyHost ? (
+              <p style={{ margin: 0, color: 'var(--ink-soft)' }}>
+                ALIS Subdomain: <strong>{selected.companyHost}</strong>{' '}
+                <a href={`https://${selected.companyHost.split(',')[0].trim()}.alisonline.com`} target="_blank" rel="noreferrer">open →</a>{' '}
+                <button className="secondary" style={{ fontSize: 11 }} onClick={() => setEditingHost(true)}>Edit</button>{' '}
+                <button className="secondary" style={{ fontSize: 11 }} onClick={handleClearHost} disabled={savingHost}>Clear</button>
+              </p>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--ink-soft)' }}>ALIS Subdomain:</span>
+                <input
+                  placeholder="e.g. vivaeast"
+                  value={hostInput}
+                  onChange={(e) => setHostInput(e.target.value)}
+                  style={{ maxWidth: 180, fontSize: 12.5 }}
+                />
+                <button style={{ fontSize: 12.5 }} onClick={handleSaveHost} disabled={savingHost || !hostInput.trim()}>
+                  {savingHost ? 'Saving…' : 'Save'}
+                </button>
+                {selected.companyHost && (
+                  <button className="secondary" style={{ fontSize: 12.5 }} onClick={() => { setEditingHost(false); setHostInput(selected.companyHost); }}>Cancel</button>
+                )}
+              </div>
+            )}
+            {hostError && <div className="notice danger" style={{ marginTop: 6 }}>{hostError}</div>}
           </div>
 
           <div className="notice" style={{ marginBottom: 16 }}>

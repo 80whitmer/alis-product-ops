@@ -19,6 +19,10 @@ export const setAlisAdminId = (id, alisAdminCompanyId, companyName) =>
   request(`/accounts/${id}/alis-admin-id`, { method: 'PUT', body: JSON.stringify({ alisAdminCompanyId, companyName }) });
 export const importAlisAdminIds = (rows) => request('/accounts/alis-admin-ids/import', { method: 'POST', body: JSON.stringify({ rows }) });
 export const clearAlisAdminId = (id) => request(`/accounts/${id}/alis-admin-id`, { method: 'DELETE' });
+export const setCompanyHost = (id, companyHost, companyName) =>
+  request(`/accounts/${id}/company-host`, { method: 'PUT', body: JSON.stringify({ companyHost, companyName }) });
+export const importCompanyHosts = (rows) => request('/accounts/company-hosts/import', { method: 'POST', body: JSON.stringify({ rows }) });
+export const clearCompanyHost = (id) => request(`/accounts/${id}/company-host`, { method: 'DELETE' });
 export const getLiveEntitlements = (id) => request(`/accounts/${id}/live-entitlements`);
 export const getDecisions = () => request('/decisions');
 export const createDecision = (decision) => request('/decisions', { method: 'POST', body: JSON.stringify(decision) });
