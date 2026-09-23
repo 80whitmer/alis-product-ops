@@ -393,7 +393,20 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, []);
+  // React 18 StrictMode double-invokes effects in dev, which fired this
+  // twice on every page load — two concurrent /api/export pipelines each
+  // hitting HubSpot's company/deal/ticket search endpoints, doubling the
+  // near-simultaneous request rate and tripping its per-second rate limit
+  // (confirmed live, Sep 2026: "HubSpot deal search failed (429)... You
+  // have reached your secondly limit"). initialLoadRef survives
+  // StrictMode's effect/cleanup/effect replay on the same instance, so the
+  // second invocation is a no-op instead of a second fetch.
+  const initialLoadRef = useRef(false);
+  useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
+    load();
+  }, []);
 
   async function handleExport() {
     if (!data) return;
