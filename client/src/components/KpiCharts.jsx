@@ -25,7 +25,7 @@ export function usd(cents) {
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 export function count(n) {
-  return (n || 0).toLocaleString('en-US');
+  return (n || 0).toLocaleString('en-US', { maximumFractionDigits: 1 });
 }
 
 function TrendEmptyState() {

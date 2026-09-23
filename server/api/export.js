@@ -4,6 +4,7 @@ const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 const { getDealsWithCompanyContext, getDealSummaryByCompany, getImplementationProjects } = require('../services/hubspotDealsSummary');
 const { computeTierSnapshotRows } = require('../services/kpiMetrics');
+const { attachPinnedNotes } = require('../services/pinnedNotes');
 const { recordKpiMetricSnapshots, listAlisAdminIds, listCompanyHosts, getMaxUpdatedAt } = require('../db/database');
 
 /** Merges the manually-entered ALIS Admin Company ID / Subdomain mappings onto each company — the same fields Account Truth needs, folded into this one shared portfolio pull instead of AccountTruth.jsx running its own separate (and equally expensive) copy of it. */
@@ -78,6 +79,7 @@ router.get('/', async (req, res, next) => {
     companies = withEnhancementCounts(companies, requests);
     companies = withAlisMappings(companies);
     const implementationProjects = withProjectCompanyContext(getImplementationProjects(dealsWithCompany), companiesById);
+    await attachPinnedNotes(implementationProjects, 'Deal');
 
     // Captures today's ARR/company/community-by-tier snapshot as a side
     // effect of this same load — the "tracking and trending" on the

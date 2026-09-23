@@ -24,6 +24,7 @@ const { hubspotRequest, batchGetCompanyIdsFor, hubspotRecordUrl } = require('./h
 const DEAL_PROPERTIES = [
   'dealname', 'hs_is_closed', 'hs_is_closed_won', 'closedate', 'createdate', 'arr_value',
   'project_status', 'project_health_rag', 'project_progress', 'project_owner', 'projected_golive_date',
+  'hs_pinned_engagement_id',
 ];
 
 // Same convention as alis-hub's TeamAmDashboard.jsx isOpenProject — every
@@ -121,6 +122,9 @@ function getImplementationProjects(dealsWithCompany) {
         createdAt: p.createdate || null,
         companyId: d.companyId,
         url: hubspotRecordUrl('deal', d.id),
+        pinnedEngagementId: p.hs_pinned_engagement_id || null,
+        pinnedNote: null,
+        pinnedNoteSegments: null,
       };
     });
 }

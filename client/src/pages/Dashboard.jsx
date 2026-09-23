@@ -9,6 +9,7 @@ import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 import OnboardingSection from '../components/OnboardingSection.jsx';
 import { CategoryMixSection, ModuleSection } from '../components/CategoryCharts.jsx';
+import PinnedNoteBody from '../components/PinnedNote.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -303,12 +304,7 @@ function RequestRow({ r, expanded, onToggle }) {
                 {r.isEnhancementRequest && <div><span className="text-neutral-400">Focus:</span> {r.enhancementFocus || 'Not set'}</div>}
                 {r.url && <div><a href={r.url} target="_blank" rel="noreferrer">Open in HubSpot &rarr;</a></div>}
               </div>
-              {r.pinnedNote && (
-                <div className="mt-3 border border-neutral-200 rounded-lg bg-white p-3">
-                  <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1">Pinned note</p>
-                  <p className="text-xs text-neutral-700 whitespace-pre-wrap">{r.pinnedNote}</p>
-                </div>
-              )}
+              <PinnedNoteBody segments={r.pinnedNoteSegments} text={r.pinnedNote} className="mt-3" />
             </div>
           </td>
         </tr>
@@ -685,15 +681,6 @@ export default function Dashboard() {
           </SectionCard>
 
           <SectionCard
-            title="Onboarding"
-            description="Implementation-tracked deals, portfolio-wide — every deal HubSpot has a Project Status on, open or closed."
-            defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportProjectsToExcel(data.implementationProjects, data.generatedAt)} />}
-          >
-            <OnboardingSection projects={data.implementationProjects} />
-          </SectionCard>
-
-          <SectionCard
             title="Enhancement Requests: Top 3"
             description="Every ticket staged as one of an account's Top 3 Enhancement asks — the requests carrying the most explicit account-level priority signal available."
             accent
@@ -754,6 +741,15 @@ export default function Dashboard() {
             action={<SectionExportButton onExport={() => exportRequestsToExcel(closedTickets, 'Tickets Closed', data.generatedAt)} />}
           >
             <CategoryMixSection items={closedTickets} status="closed" />
+          </SectionCard>
+
+          <SectionCard
+            title="Onboarding"
+            description="Implementation-tracked deals, portfolio-wide — every deal HubSpot has a Project Status on, open or closed."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportProjectsToExcel(data.implementationProjects, data.generatedAt)} />}
+          >
+            <OnboardingSection projects={data.implementationProjects} />
           </SectionCard>
         </>
       )}

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
+import PinnedNoteBody from './PinnedNote.jsx';
 
 /**
  * "Onboarding" — implementation-tracked deals, portfolio-wide, ported from
@@ -156,6 +157,7 @@ function OnboardingVolumeChart({ allProjects, openProjects }) {
 export default function OnboardingSection({ projects }) {
   const [sort, setSort] = useState(null);
   const [hideClosed, setHideClosed] = useState(true);
+  const [noteOpenId, setNoteOpenId] = useState(null);
 
   const openProjects = useMemo(() => projects.filter((p) => p.isOpen), [projects]);
   const avgDaysOpen = openProjects.length > 0
@@ -259,10 +261,25 @@ export default function OnboardingSection({ projects }) {
               </thead>
               <tbody>
                 {visible.slice(0, 100).map((p) => (
-                  <tr key={p.dealId} className="border-t border-neutral-100">
+                  <Fragment key={p.dealId}>
+                  <tr className="border-t border-neutral-100">
                     <td className="py-2 pr-4">{p.companyName || '—'}</td>
-                    <td className="py-2 pr-4 max-w-xs truncate" title={p.name}>
-                      {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="text-accent-600 hover:underline">{p.name}</a> : p.name}
+                    <td className="py-2 pr-4 max-w-xs" title={p.name}>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">
+                          {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="text-accent-600 hover:underline">{p.name}</a> : p.name}
+                        </span>
+                        {p.pinnedNote && (
+                          <button
+                            type="button"
+                            onClick={() => setNoteOpenId(noteOpenId === p.dealId ? null : p.dealId)}
+                            title="Show HubSpot pinned note"
+                            className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border border-accent-300 text-accent-600 bg-accent-50 hover:bg-accent-100"
+                          >
+                            NOTE
+                          </button>
+                        )}
+                      </span>
                     </td>
                     <td className="py-2 pr-4 text-neutral-500">{tierLabel(p.tier)}</td>
                     <td className="py-2 pr-4 text-neutral-500">{p.projectStatus}</td>
@@ -276,6 +293,14 @@ export default function OnboardingSection({ projects }) {
                     <td className="py-2 pr-4 text-neutral-500 whitespace-nowrap">{p.projectedGoLiveDate ? p.projectedGoLiveDate.slice(0, 10) : '—'}</td>
                     <td className="py-2 text-neutral-500 whitespace-nowrap">{p.createdAt ? p.createdAt.slice(0, 10) : '—'}</td>
                   </tr>
+                  {noteOpenId === p.dealId && (
+                    <tr>
+                      <td colSpan={9} className="bg-neutral-50 px-2 py-3">
+                        <PinnedNoteBody segments={p.pinnedNoteSegments} text={p.pinnedNote} className="max-h-80 overflow-y-auto" />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

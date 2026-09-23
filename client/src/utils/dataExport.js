@@ -160,6 +160,7 @@ function addProjectsSheet(workbook, projects, sheetName) {
     { header: 'Created', key: 'createdAt', width: 12 },
     { header: 'Deal ID', key: 'dealId', width: 14 },
     { header: 'Link', key: 'url', width: 40 },
+    { header: 'Pinned Note', key: 'pinnedNote', width: 60 },
   ];
   for (const p of projects) {
     sheet.addRow({
@@ -176,6 +177,7 @@ function addProjectsSheet(workbook, projects, sheetName) {
       createdAt: p.createdAt ? p.createdAt.slice(0, 10) : '',
       dealId: p.dealId,
       url: p.url,
+      pinnedNote: p.pinnedNote,
     });
   }
   sheet.getRow(1).font = { bold: true };

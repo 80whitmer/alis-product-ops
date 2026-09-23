@@ -15,6 +15,7 @@
  */
 const { hubspotRequest, getPipelineStageLabels, getPropertyOptionLabels, batchGetCompanyIdsFor, hubspotRecordUrl, chunk } = require('./hubspotClient');
 const { inferModule } = require('./moduleInference');
+const { attachPinnedNotes, htmlToText } = require('./pinnedNotes');
 
 const CATEGORY_2_0_LABELS = {
   false: 'General Question',
@@ -60,21 +61,6 @@ function resolveCategory(p) {
   return HS_TICKET_CATEGORY_LABELS[hs] ?? hs;
 }
 
-function htmlToText(html) {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 /** Map<ticketId, plainText description> — fetched separately (not on the portfolio-wide search) since only escalations missing a module need it. */
 async function getTicketDescriptions(ticketIds) {
   const result = new Map();
@@ -88,26 +74,6 @@ async function getTicketDescriptions(ticketIds) {
     }
     for (const t of body.results || []) {
       if (t.properties?.content) result.set(t.id, htmlToText(t.properties.content));
-    }
-  }
-  return result;
-}
-
-/** Map<engagementId, plainText> for pinned notes. A pinned engagement can also be an email/call/task — those ids just don't resolve as notes and are skipped. */
-async function getPinnedNoteText(engagementIds) {
-  const result = new Map();
-  for (const batch of chunk([...new Set(engagementIds)], 100)) {
-    const { status, body } = await hubspotRequest('POST', '/crm/v3/objects/notes/batch/read', {
-      properties: ['hs_note_body'],
-      inputs: batch.map((id) => ({ id })),
-    });
-    // 207 = some ids weren't notes; the ones that were still come back in results.
-    if (status !== 200 && status !== 207) {
-      throw new Error(`HubSpot pinned-note batch read failed (${status}): ${JSON.stringify(body)}`);
-    }
-    for (const note of body.results || []) {
-      const text = note.properties?.hs_note_body ? htmlToText(note.properties.hs_note_body) : '';
-      if (text) result.set(note.id, text);
     }
   }
   return result;
@@ -188,6 +154,7 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
         enhancementFocus: rawFocus ? (focusLabels.get(rawFocus) || rawFocus) : null,
         pinnedEngagementId: p.hs_pinned_engagement_id || null,
         pinnedNote: null,
+        pinnedNoteSegments: null,
         isEscalation: category === 'ALIS Escalation',
         isEnhancementRequest: category === 'Enhancement' || FEATURE_REQUEST_PATTERN.test(p.hs_ticket_category || '') || /enhancement/i.test(p.subject || ''),
         isTopThree: (p.top_3 != null && p.top_3 !== '') || label?.stage === TOP_3_STATUS_LABEL,
@@ -213,19 +180,7 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
 
   // Only escalations/enhancements — the two surfaces that show pinned notes
   // — so this stays a handful of batch calls, not one per ticket.
-  const pinnedIds = rows
-    .filter((r) => r.pinnedEngagementId && (r.isEscalation || r.isEnhancementRequest))
-    .map((r) => r.pinnedEngagementId);
-  if (pinnedIds.length > 0) {
-    try {
-      const noteText = await getPinnedNoteText(pinnedIds);
-      for (const r of rows) {
-        if (r.pinnedEngagementId) r.pinnedNote = noteText.get(r.pinnedEngagementId) || null;
-      }
-    } catch (err) {
-      console.warn('Pinned-note lookup failed; continuing without notes:', err.message);
-    }
-  }
+  await attachPinnedNotes(rows.filter((r) => r.isEscalation || r.isEnhancementRequest), 'Ticket');
 
   const needModule = rows.filter((r) => r.isEscalation && !r.module);
   let descriptions = new Map();
