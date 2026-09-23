@@ -8,6 +8,7 @@ import { exportCompanyHostTemplate, parseCompanyHostTemplate } from '../utils/co
 import { useDataCache } from '../DataCache.jsx';
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 import EntitlementCategories from '../components/EntitlementCategories.jsx';
+import { exportAccountTruthToExcel, exportAccountTruthToPdf } from '../utils/accountTruthExport.js';
 
 function formatCents(cents) {
   if (cents == null) return '—';
@@ -52,6 +53,9 @@ export default function AccountTruth() {
   const [liveEntitlements, setLiveEntitlements] = useState(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState(null);
+  const [exportingTruthExcel, setExportingTruthExcel] = useState(false);
+  const [exportingTruthPdf, setExportingTruthPdf] = useState(false);
+  const [exportTruthError, setExportTruthError] = useState(null);
 
   // Shares the Dashboard's own cache (client/src/DataCache.jsx) rather than
   // running its own separate fetch — Aaron, Sep 2026: "Can Account Truth
@@ -159,6 +163,30 @@ export default function AccountTruth() {
       setAlisIdError(err.message);
     } finally {
       setSavingAlisId(false);
+    }
+  }
+
+  async function handleExportTruthExcel() {
+    setExportingTruthExcel(true);
+    setExportTruthError(null);
+    try {
+      await exportAccountTruthToExcel(selected, truth, liveEntitlements);
+    } catch (err) {
+      setExportTruthError(err.message);
+    } finally {
+      setExportingTruthExcel(false);
+    }
+  }
+
+  async function handleExportTruthPdf() {
+    setExportingTruthPdf(true);
+    setExportTruthError(null);
+    try {
+      await exportAccountTruthToPdf(selected, truth, liveEntitlements);
+    } catch (err) {
+      setExportTruthError(err.message);
+    } finally {
+      setExportingTruthPdf(false);
     }
   }
 
@@ -487,7 +515,18 @@ export default function AccountTruth() {
 
       {selected && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>{selected.name}</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <h3 style={{ marginTop: 0 }}>{selected.name}</h3>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="secondary" onClick={handleExportTruthExcel} disabled={exportingTruthExcel}>
+                {exportingTruthExcel ? 'Exporting…' : '⬇ Export to Excel'}
+              </button>
+              <button className="secondary" onClick={handleExportTruthPdf} disabled={exportingTruthPdf}>
+                {exportingTruthPdf ? 'Exporting…' : '⬇ Export to PDF'}
+              </button>
+            </div>
+          </div>
+          {exportTruthError && <div className="notice danger" style={{ marginBottom: 8 }}>{exportTruthError}</div>}
 
           <div style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '0 0 6px' }}>

@@ -5,6 +5,7 @@ const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
 const { discoverAlisAdminIds } = require('../services/alisCompanyDiscovery');
 const { startPortfolioEntitlementsCheck, getStatus: getPortfolioEntitlementsStatus, getPortfolioEntitlementRollup } = require('../services/portfolioEntitlementsJob');
+const { renderAccountTruthPdf } = require('../services/accountTruthPdf');
 const {
   getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
   setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, listAlisAdminIds,
@@ -196,6 +197,28 @@ router.post('/portfolio-entitlements/run', (req, res) => {
 // memory).
 router.get('/portfolio-entitlements/status', (req, res) => {
   res.json({ job: getPortfolioEntitlementsStatus(), rollup: getPortfolioEntitlementRollup() });
+});
+
+// POST /api/accounts/:id/export-pdf — the full Account Truth report (Products,
+// ALIS Subdomain/Admin ID, Live Entitlements if a check has been run, Deals)
+// as a PDF. Takes the already-loaded { account, truth, liveEntitlements }
+// in the body rather than re-fetching any of it server-side — no extra
+// HubSpot calls, and no live ALIS admin login just to produce a PDF of data
+// the client already has on screen.
+router.post('/:id/export-pdf', async (req, res, next) => {
+  try {
+    const { account, truth, liveEntitlements } = req.body || {};
+    if (!account?.name) {
+      return res.status(400).json({ error: 'Expected { account, truth, liveEntitlements }' });
+    }
+    const buffer = await renderAccountTruthPdf({ account, truth, liveEntitlements });
+    const filename = `${account.name.replace(/[^a-z0-9]+/gi, '-')}-Account-Truth.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;
