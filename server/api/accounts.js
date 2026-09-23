@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getContractedModulesForCompany } = require('../services/hubspotDeals');
+const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 
 // GET /api/accounts — portfolio-wide, no owner scoping.
 router.get('/', async (req, res, next) => {
@@ -29,6 +30,17 @@ router.get('/:id/contract-truth', async (req, res, next) => {
         ? 'Line items are blocked — the HubSpot private app token is missing crm.objects.line_items.read / crm.schemas.line_items.read. Deal-level info (name, ARR, close date) is still real.'
         : null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/accounts/:id/contacts — key contacts for the "who do we actually
+// call at this account" question, live (no cache).
+router.get('/:id/contacts', async (req, res, next) => {
+  try {
+    const contacts = await getKeyContactsForCompany(req.params.id);
+    res.json({ contacts });
   } catch (err) {
     next(err);
   }

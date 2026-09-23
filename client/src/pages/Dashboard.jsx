@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getExportData } from '../api.js';
+import { getExportData, getKeyContacts } from '../api.js';
 import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
@@ -157,6 +157,99 @@ function SectionExportButton({ onExport }) {
 
 const REQUEST_COLUMNS = 10;
 
+// 10 data columns + the trailing "expand for key contacts" column.
+const ACCOUNT_COLUMNS = 11;
+
+const ACCOUNT_SORT_COLUMNS = [
+  { key: 'name', label: 'Company' },
+  { key: 'accountManagerName', label: 'Account Manager' },
+  { key: 'tier', label: 'Tier' },
+  { key: 'arrCents', label: 'ARR' },
+  { key: 'communityCount', label: 'Communities', title: "Sum of each account's child-company count in HubSpot" },
+  { key: 'totalCapacity', label: 'Capacity', title: "HubSpot's company_total_capacity field — hand-maintained, not a live ALIS pull" },
+  { key: 'openDealsCount', label: 'Open Deals', title: 'Deals not yet closed, associated with this account' },
+  { key: 'openDealValueCents', label: 'Open Deal Value', title: "Sum of ARR value across this account's open deals" },
+  { key: 'arrAddedThisYearCents', label: `ARR Added (${new Date().getFullYear()})`, title: 'Sum of ARR value across deals closed-won this calendar year' },
+  { key: 'lastActivityDate', label: 'Last Activity', title: 'Last time a note, call, email, meeting, or task was logged for this account in HubSpot' },
+];
+
+// Tier/ARR/communities/etc. sort numerically low-to-high; everything else
+// (company name, AM name, the ISO date string) sorts fine as plain text.
+const NUMERIC_ACCOUNT_KEYS = new Set([
+  'tier', 'arrCents', 'communityCount', 'totalCapacity', 'openDealsCount', 'openDealValueCents', 'arrAddedThisYearCents',
+]);
+
+function compareAccounts(a, b, key, dir) {
+  const sign = dir === 'asc' ? 1 : -1;
+  if (NUMERIC_ACCOUNT_KEYS.has(key)) {
+    return ((a[key] ?? -Infinity) - (b[key] ?? -Infinity)) * sign;
+  }
+  return String(a[key] || '').localeCompare(String(b[key] || '')) * sign;
+}
+
+/** Clickable column header — click cycles asc -> desc -> unsorted, same as most spreadsheet tools. */
+function SortableHeader({ col, sort, onSort }) {
+  const active = sort.key === col.key;
+  const arrow = active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return (
+    <th
+      onClick={() => onSort(col.key)}
+      title={col.title}
+      className="cursor-pointer select-none hover:text-primary-600"
+    >
+      {col.label}{arrow}
+    </th>
+  );
+}
+
+/** One account row, click-to-expand into its key contacts (fetched from HubSpot on first expand, then cached by the parent). */
+function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
+  return (
+    <>
+      <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
+        <td>{a.name}</td>
+        <td>{a.accountManagerName || '—'}</td>
+        <td>{a.tier ?? '—'}</td>
+        <td>{usd(a.arrCents)}</td>
+        <td>{a.communityCount ?? '—'}</td>
+        <td>{a.totalCapacity ?? '—'}</td>
+        <td>{a.openDealsCount ?? 0}</td>
+        <td>{usd(a.openDealValueCents)}</td>
+        <td>{usd(a.arrAddedThisYearCents)}</td>
+        <td>{a.lastActivityDate ? a.lastActivityDate.slice(0, 10) : '—'}</td>
+        <td className="text-center text-neutral-400" title="Click to view key contacts">{expanded ? '▲' : '▼'}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={ACCOUNT_COLUMNS} className="bg-neutral-50">
+            <div className="py-3 px-2 text-sm">
+              {loading && <p className="text-neutral-500">Loading contacts…</p>}
+              {error && <p className="text-red-600">{error}</p>}
+              {!loading && !error && contacts && contacts.length === 0 && (
+                <p className="text-neutral-500">No contacts associated with this company in HubSpot.</p>
+              )}
+              {!loading && contacts && contacts.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {contacts.map((c) => (
+                    <div key={c.id} className="border border-neutral-200 rounded-lg p-3 bg-white">
+                      <div className="font-medium text-primary-900">
+                        {c.url ? <a href={c.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{c.name}</a> : c.name}
+                      </div>
+                      {c.title && <div className="text-xs text-neutral-500">{c.title}</div>}
+                      {c.email && <div className="text-xs text-neutral-600 mt-1">{c.email}</div>}
+                      {c.phone && <div className="text-xs text-neutral-600">{c.phone}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 /** One ticket row, click-to-expand into its full detail — pipeline, both dates, ticket id, and the HubSpot link, none of which fit in the summary row. */
 function RequestRow({ r, expanded, onToggle }) {
   return (
@@ -268,6 +361,31 @@ export default function Dashboard() {
   const [exporting, setExporting] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
+  const [accountSort, setAccountSort] = useState({ key: null, dir: 'asc' });
+  const [expandedAccountId, setExpandedAccountId] = useState(null);
+  const [contactsByAccount, setContactsByAccount] = useState({});
+  const [contactsLoadingId, setContactsLoadingId] = useState(null);
+  const [contactsErrorByAccount, setContactsErrorByAccount] = useState({});
+
+  function handleAccountSort(key) {
+    setAccountSort((prev) => {
+      if (prev.key !== key) return { key, dir: 'asc' };
+      if (prev.dir === 'asc') return { key, dir: 'desc' };
+      return { key: null, dir: 'asc' };
+    });
+  }
+
+  function toggleAccountContacts(accountId) {
+    const opening = expandedAccountId !== accountId;
+    setExpandedAccountId(opening ? accountId : null);
+    if (opening && !contactsByAccount[accountId]) {
+      setContactsLoadingId(accountId);
+      getKeyContacts(accountId)
+        .then((d) => setContactsByAccount((prev) => ({ ...prev, [accountId]: d.contacts })))
+        .catch((err) => setContactsErrorByAccount((prev) => ({ ...prev, [accountId]: err.message })))
+        .finally(() => setContactsLoadingId((id) => (id === accountId ? null : id)));
+    }
+  }
 
   function load() {
     setLoading(true);
@@ -298,6 +416,11 @@ export default function Dashboard() {
       a.name?.toLowerCase().includes(q) || a.accountManagerName?.toLowerCase().includes(q)
     );
   }, [data, accountSearch]);
+
+  const sortedAccounts = useMemo(() => {
+    if (!accountSort.key) return filteredAccounts;
+    return [...filteredAccounts].sort((a, b) => compareAccounts(a, b, accountSort.key, accountSort.dir));
+  }, [filteredAccounts, accountSort]);
 
   const stages = useMemo(() => {
     if (!data) return [];
@@ -396,32 +519,23 @@ export default function Dashboard() {
               <table>
                 <thead>
                   <tr>
-                    <th>Company</th>
-                    <th>Account Manager</th>
-                    <th>Tier</th>
-                    <th>ARR</th>
-                    <th title="Sum of each account's child-company count in HubSpot">Communities</th>
-                    <th title="HubSpot's company_total_capacity field — hand-maintained, not a live ALIS pull">Capacity</th>
-                    <th title="Deals not yet closed, associated with this account">Open Deals</th>
-                    <th title="Sum of ARR value across this account's open deals">Open Deal Value</th>
-                    <th title="Sum of ARR value across deals closed-won this calendar year">ARR Added ({new Date().getFullYear()})</th>
-                    <th title="Last time a note, call, email, meeting, or task was logged for this account in HubSpot">Last Activity</th>
+                    {ACCOUNT_SORT_COLUMNS.map((col) => (
+                      <SortableHeader key={col.key} col={col} sort={accountSort} onSort={handleAccountSort} />
+                    ))}
+                    <th title="Click a row to view key contacts"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAccounts.slice(0, 50).map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.name}</td>
-                      <td>{a.accountManagerName || '—'}</td>
-                      <td>{a.tier ?? '—'}</td>
-                      <td>{usd(a.arrCents)}</td>
-                      <td>{a.communityCount ?? '—'}</td>
-                      <td>{a.totalCapacity ?? '—'}</td>
-                      <td>{a.openDealsCount ?? 0}</td>
-                      <td>{usd(a.openDealValueCents)}</td>
-                      <td>{usd(a.arrAddedThisYearCents)}</td>
-                      <td>{a.lastActivityDate ? a.lastActivityDate.slice(0, 10) : '—'}</td>
-                    </tr>
+                  {sortedAccounts.slice(0, 50).map((a) => (
+                    <AccountRow
+                      key={a.id}
+                      a={a}
+                      expanded={expandedAccountId === a.id}
+                      onToggle={() => toggleAccountContacts(a.id)}
+                      contacts={contactsByAccount[a.id]}
+                      loading={contactsLoadingId === a.id}
+                      error={contactsErrorByAccount[a.id]}
+                    />
                   ))}
                 </tbody>
               </table>
