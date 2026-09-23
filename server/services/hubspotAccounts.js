@@ -7,7 +7,7 @@
  */
 const { hubspotRequest } = require('./hubspotClient');
 
-const COMPANY_PROPERTIES = ['name', 'account_manager', 'hs_num_child_companies', 'lifecyclestage', 'createdate', 'arr', 'client_tier', 'client_teir_2_0', 'notes_last_updated', 'company_total_capacity'];
+const COMPANY_PROPERTIES = ['name', 'account_manager', 'hs_num_child_companies', 'lifecyclestage', 'createdate', 'arr', 'client_tier', 'client_teir_2_0', 'notes_last_updated', 'company_total_capacity', 'alis_products', 'alis_package'];
 
 function resolveTier(properties) {
   const newTier = properties.client_teir_2_0;
@@ -74,6 +74,21 @@ async function getAllHomeOfficeCompanies() {
         ? Number(c.properties.hs_num_child_companies) : null,
       totalCapacity: c.properties.company_total_capacity != null && c.properties.company_total_capacity !== ''
         ? Number(c.properties.company_total_capacity) : null,
+      // "Enabled" per HubSpot's own record, NOT a live ALIS entitlement
+      // check — alis-hub's actual Enabled column comes from a Playwright
+      // scrape of ALIS admin's entitlement checkboxes (server/automation/
+      // playwright/entitlementsPage.js there), which needs live ALIS
+      // credentials this app deliberately doesn't have. `alis_products`
+      // is HubSpot's own multi-select checkbox property (semicolon-
+      // delimited stored value) that AMs maintain by hand recording which
+      // modules an account has — a real, ~85%-populated, zero-extra-call
+      // proxy (confirmed live, Sep 2026), but it reflects what was
+      // sold/configured in HubSpot, not a live "is this actually flipped
+      // on in ALIS right now" confirmation the way alis-hub's scrape is.
+      products: c.properties.alis_products
+        ? c.properties.alis_products.split(';').map((p) => p.trim()).filter(Boolean)
+        : [],
+      package: c.properties.alis_package || null,
     })));
     after = body.paging?.next?.after;
   } while (after);

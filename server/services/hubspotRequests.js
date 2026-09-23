@@ -125,4 +125,20 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
     .filter((t) => t.category !== EXCLUDED_CATEGORY);
 }
 
-module.exports = { getTicketHistory };
+/** Merges each account's open/closed Enhancement Request ticket counts onto it — shared by server/api/export.js (Dashboard's Accounts table) and server/api/accounts.js (Account Truth's list) so both surfaces agree. Zero is a real, common state, not missing data. */
+function withEnhancementCounts(companies, ticketHistory) {
+  const openCounts = new Map();
+  const closedCounts = new Map();
+  for (const t of ticketHistory) {
+    if (!t.isEnhancementRequest || !t.companyId) continue;
+    const counts = t.isOpen ? openCounts : closedCounts;
+    counts.set(t.companyId, (counts.get(t.companyId) || 0) + 1);
+  }
+  return companies.map((c) => ({
+    ...c,
+    openEnhancementCount: openCounts.get(c.id) || 0,
+    closedEnhancementCount: closedCounts.get(c.id) || 0,
+  }));
+}
+
+module.exports = { getTicketHistory, withEnhancementCounts };

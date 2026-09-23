@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
-const { getTicketHistory } = require('../services/hubspotRequests');
+const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 const { getDealSummaryByCompany } = require('../services/hubspotDealsSummary');
 
 /** Merges the deal roll-up onto each company — zero deals is a real, common state (most of the portfolio has none open), not missing data, so it defaults to 0s rather than null. */
@@ -15,22 +15,6 @@ function withDealSummary(companies, dealSummaryByCompany) {
       arrAddedThisYearCents: s?.arrAddedThisYearCents ?? 0,
     };
   });
-}
-
-/** Merges each account's open/closed Enhancement Request ticket counts onto it, for the Accounts table's own two columns — zero is a real, common state, not missing data. */
-function withEnhancementCounts(companies, ticketHistory) {
-  const openCounts = new Map();
-  const closedCounts = new Map();
-  for (const t of ticketHistory) {
-    if (!t.isEnhancementRequest || !t.companyId) continue;
-    const counts = t.isOpen ? openCounts : closedCounts;
-    counts.set(t.companyId, (counts.get(t.companyId) || 0) + 1);
-  }
-  return companies.map((c) => ({
-    ...c,
-    openEnhancementCount: openCounts.get(c.id) || 0,
-    closedEnhancementCount: closedCounts.get(c.id) || 0,
-  }));
 }
 
 // GET /api/export — the V1 "just serve up the data" endpoint. Returns raw,

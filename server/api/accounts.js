@@ -3,11 +3,20 @@ const router = express.Router();
 const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getContractedModulesForCompany } = require('../services/hubspotDeals');
 const { getKeyContactsForCompany } = require('../services/hubspotContacts');
+const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
 
-// GET /api/accounts — portfolio-wide, no owner scoping.
+// GET /api/accounts — portfolio-wide, no owner scoping. Same
+// open/closed Enhancement Request counts as the Dashboard's Accounts
+// table (server/api/export.js) — this is the same portfolio-wide ticket
+// pull, so the page costs the same ~1-2 minutes that one does rather than
+// staying a fast company-only load, but the two lists would otherwise
+// silently disagree on these two columns.
 router.get('/', async (req, res, next) => {
   try {
-    const companies = await getAllHomeOfficeCompanies();
+    const rawCompanies = await getAllHomeOfficeCompanies();
+    const companiesById = new Map(rawCompanies.map((c) => [c.id, c]));
+    const ticketHistory = await getTicketHistory({ lookbackDays: 400, companiesById });
+    const companies = withEnhancementCounts(rawCompanies, ticketHistory);
     res.json({ companies });
   } catch (err) {
     next(err);

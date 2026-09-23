@@ -44,8 +44,10 @@ export default function AccountTruth() {
       </div>
 
       <div className="notice">
-        Enabled (ALIS entitlements) and Used (ALIS export API activity) columns aren't
-        built yet — this is Contracted only, v1. See docs/CONTEXT.md view #2.
+        Enabled is now live, sourced from HubSpot's own <code>alis_products</code> field
+        (AM-maintained — what was sold/configured, not a live ALIS check). Used (real ALIS
+        export API activity) still isn't built — that needs live ALIS admin credentials,
+        which this app deliberately doesn't take. See docs/CONTEXT.md view #2.
       </div>
 
       <div className="card">
@@ -58,7 +60,14 @@ export default function AccountTruth() {
         {loadError && <div className="notice danger">{loadError}</div>}
         <table>
           <thead>
-            <tr><th>Account</th><th>Tier</th><th>ARR</th><th></th></tr>
+            <tr>
+              <th>Account</th>
+              <th>Tier</th>
+              <th>ARR</th>
+              <th title="Open Enhancement Request tickets for this account">Open Enh.</th>
+              <th title="Closed Enhancement Request tickets for this account, last ~13 months">Closed Enh.</th>
+              <th></th>
+            </tr>
           </thead>
           <tbody>
             {filtered.slice(0, 25).map((a) => (
@@ -66,6 +75,8 @@ export default function AccountTruth() {
                 <td>{a.name}</td>
                 <td>{a.tier ?? '—'}</td>
                 <td>{formatCents(a.arrCents)}</td>
+                <td>{a.openEnhancementCount ?? 0}</td>
+                <td>{a.closedEnhancementCount ?? 0}</td>
                 <td><button className="secondary" onClick={() => selectAccount(a)}>View contract truth</button></td>
               </tr>
             ))}
@@ -77,6 +88,31 @@ export default function AccountTruth() {
       {selected && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>{selected.name}</h3>
+
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '0 0 6px' }}>
+              Enabled — per HubSpot's <code>alis_products</code> field, not a live ALIS check
+              {selected.package && <> · Package: <strong>{selected.package}</strong></>}
+            </p>
+            {selected.products?.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {selected.products.map((p) => (
+                  <span
+                    key={p}
+                    style={{
+                      fontSize: 12.5, padding: '3px 10px', borderRadius: 999,
+                      background: 'var(--accent-soft, #fef3e2)', border: '1px solid var(--line)',
+                    }}
+                  >
+                    {p}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No products recorded in HubSpot for this account.</p>
+            )}
+          </div>
+
           {truthLoading && <p>Loading deals…</p>}
           {truthError && <div className="notice danger">{truthError}</div>}
           {truth?.scopeWarning && <div className="notice">{truth.scopeWarning}</div>}
