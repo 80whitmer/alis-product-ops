@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getKeyContacts } from '../api.js';
 import { useDataCache } from '../DataCache.jsx';
-import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel } from '../utils/dataExport.js';
+import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel, exportKeyContactsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
 import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_COLOR, count as formatCount } from '../components/KpiCharts.jsx';
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 import OnboardingSection from '../components/OnboardingSection.jsx';
+import KeyContactsSection from '../components/KeyContactsSection.jsx';
 import { CategoryMixSection, ModuleSection } from '../components/CategoryCharts.jsx';
 import PinnedNoteBody from '../components/PinnedNote.jsx';
 
@@ -23,7 +24,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 // conventions"), alphabetized at build time like theirs so a new section
 // can't drift out of order.
 const OVERVIEW_SECTIONS = [
-  { category: 'Accounts', items: ['Accounts', 'Onboarding', 'Portfolio KPIs'].sort((a, b) => a.localeCompare(b)) },
+  { category: 'Accounts', items: ['Accounts', 'Key Contacts', 'Onboarding', 'Portfolio KPIs'].sort((a, b) => a.localeCompare(b)) },
   { category: 'Tickets', items: ['Enhancement Requests', 'Enhancement Requests: Top 3', 'Tickets by Category Closed', 'Tickets by Category Open', 'Tickets by Module', 'Tickets: Escalation'].sort((a, b) => a.localeCompare(b)) },
 ];
 
@@ -594,6 +595,14 @@ export default function Dashboard() {
             {filteredAccounts.length > 50 && (
               <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredAccounts.length} — narrow your search.</p>
             )}
+          </SectionCard>
+
+          <SectionCard
+            title="Key Contacts"
+            description="Every contact tagged with a key HubSpot association-label role, portfolio-wide — who to actually call at each account."
+            defaultExpanded={false}
+          >
+            <KeyContactsSection companies={data.companies} onExport={(rows) => exportKeyContactsToExcel(rows, data.generatedAt)} />
           </SectionCard>
 
           <SectionCard

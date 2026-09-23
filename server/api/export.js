@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
+const { getKeyContactsForCompanies } = require('../services/hubspotContacts');
 const { getDealsWithCompanyContext, getDealSummaryByCompany, getImplementationProjects } = require('../services/hubspotDealsSummary');
 const { computeTierSnapshotRows } = require('../services/kpiMetrics');
 const { attachPinnedNotes } = require('../services/pinnedNotes');
@@ -34,6 +35,33 @@ function withDealSummary(companies, dealSummaryByCompany) {
 /** Tier 0/blank AND no ARR — Aaron, Sep 2026: "filter out all of the tier 0s with no ARR -- they don't seem like active clients." A tier OR any ARR keeps an account in. */
 function isActiveClient(c) {
   return (c.tier != null && c.tier !== 0) || (c.arrCents || 0) > 0;
+}
+
+/**
+ * Attaches each active company's tagged key contacts (one batch pull,
+ * portfolio-wide — see getKeyContactsForCompanies) plus which of the
+ * portfolio's actually-in-use role labels this company has NO contact
+ * tagged with. "In use" (not the full 10-label target list) so a label
+ * nobody on the whole portfolio has ever tagged doesn't show as "missing"
+ * everywhere — same derived-from-usage convention as alis-hub's Key
+ * Contacts section (Aaron, Sep 2026: "build out a parallel key contacts
+ * section... on the Product hub dashboard").
+ */
+async function withKeyContacts(companies) {
+  const keyContactsByCompany = await getKeyContactsForCompanies(companies.map((c) => c.id));
+  const labelsInUse = new Set();
+  for (const contacts of keyContactsByCompany.values()) {
+    for (const contact of contacts) for (const role of contact.roles) labelsInUse.add(role);
+  }
+  return companies.map((c) => {
+    const keyContacts = keyContactsByCompany.get(c.id) || [];
+    const covered = new Set(keyContacts.flatMap((k) => k.roles));
+    return {
+      ...c,
+      keyContacts,
+      missingKeyContactLabels: [...labelsInUse].filter((label) => !covered.has(label)).sort(),
+    };
+  });
 }
 
 /** Joins each implementation project onto its company's context (name/tier/ARR/AM) — same convention as hubspotRequests.js's ticket rows for a deal whose company isn't in the portfolio list. */
@@ -78,6 +106,7 @@ router.get('/', async (req, res, next) => {
     const requests = await getTicketHistory({ lookbackDays: 400, companiesById });
     companies = withEnhancementCounts(companies, requests);
     companies = withAlisMappings(companies);
+    companies = await withKeyContacts(companies);
     const implementationProjects = withProjectCompanyContext(getImplementationProjects(dealsWithCompany), companiesById);
     await attachPinnedNotes(implementationProjects, 'Deal');
 

@@ -19,6 +19,7 @@
  */
 const { newPage, ensureLoggedIn } = require('../automation/playwright/browser');
 const { captureEntitlements } = require('../automation/playwright/entitlementsPage');
+const { groupEntitlements } = require('./entitlementCategories');
 
 /** "resident_compliance_entitlement_8" -> "Resident Compliance" — strips the "_entitlement_<id>" suffix and title-cases the rest. */
 function humanizeFlagId(flagId) {
@@ -32,22 +33,30 @@ function humanizeFlagId(flagId) {
 
 /**
  * Logs into ALIS admin, scrapes the Entitlements page for `alisAdminCompanyId`,
- * and returns every CHECKED flag as a humanized label plus the raw capture
- * for anyone who wants the underlying flag ids. Opens and closes its own
- * browser context per call — see browser.js's doc comment on why there's no
- * cross-call session reuse.
+ * and returns every flag (on AND off — the "recommend enabling" analysis
+ * needs the names of what's currently off, not just what's on) grouped into
+ * ALIS product categories and cross-checked against `hubspotProducts`
+ * (the company's `alis_products` field) for mismatches. Opens and closes
+ * its own browser context per call — see browser.js's doc comment on why
+ * there's no cross-call session reuse.
  */
-async function getLiveEntitlements(alisAdminCompanyId) {
+async function getLiveEntitlements(alisAdminCompanyId, hubspotProducts) {
   const page = await newPage();
   try {
     await ensureLoggedIn(page);
     const capture = await captureEntitlements(page, alisAdminCompanyId);
-    const enabledFlagIds = Object.entries(capture.flags).filter(([, checked]) => checked).map(([id]) => id);
+    const flags = Object.entries(capture.flags)
+      .map(([id, enabled]) => ({ id, label: humanizeFlagId(id), enabled }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const enabledCount = flags.filter((f) => f.enabled).length;
+    const { categories, soldWithNoFlags } = groupEntitlements(flags, hubspotProducts);
     return {
       capturedAt: capture.capturedAt,
       sourceUrl: capture.sourceUrl,
-      totalFlagCount: Object.keys(capture.flags).length,
-      enabledLabels: enabledFlagIds.map(humanizeFlagId).sort((a, b) => a.localeCompare(b)),
+      totalFlagCount: flags.length,
+      enabledCount,
+      categories,
+      soldWithNoFlags,
     };
   } finally {
     await page.context().close();

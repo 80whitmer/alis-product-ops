@@ -191,3 +191,39 @@ export async function exportProjectsToExcel(projects, generatedAt) {
   addProjectsSheet(workbook, projects, 'Onboarding');
   await download(workbook, `alis-product-hub-onboarding-${generatedAt.slice(0, 10)}.xlsx`);
 }
+
+function addKeyContactsSheet(workbook, rows) {
+  const sheet = workbook.addWorksheet('Key Contacts');
+  sheet.columns = [
+    { header: 'Name', key: 'name', width: 24 },
+    { header: 'Title', key: 'title', width: 22 },
+    { header: 'Company', key: 'companyName', width: 30 },
+    { header: 'Tier', key: 'tier', width: 8 },
+    { header: 'Label(s)', key: 'roles', width: 34 },
+    { header: 'Email', key: 'email', width: 28 },
+    { header: 'Phone', key: 'phone', width: 16 },
+    { header: 'Link', key: 'url', width: 40 },
+  ];
+  for (const r of rows) {
+    sheet.addRow({
+      name: r.name,
+      title: r.title,
+      companyName: r.companyName,
+      tier: r.tier,
+      roles: (r.roles || []).join(', '),
+      email: r.email,
+      phone: r.phone,
+      url: r.url,
+    });
+  }
+  sheet.getRow(1).font = { bold: true };
+  return sheet;
+}
+
+/** Per-section export for the Key Contacts section's flattened contact-per-row list. */
+export async function exportKeyContactsToExcel(rows, generatedAt) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  addKeyContactsSheet(workbook, rows);
+  await download(workbook, `alis-product-hub-key-contacts-${generatedAt.slice(0, 10)}.xlsx`);
+}

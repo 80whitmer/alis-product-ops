@@ -7,6 +7,7 @@ import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/al
 import { exportCompanyHostTemplate, parseCompanyHostTemplate } from '../utils/companyHostTemplate.js';
 import { useDataCache } from '../DataCache.jsx';
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
+import EntitlementCategories from '../components/EntitlementCategories.jsx';
 
 function formatCents(cents) {
   if (cents == null) return '—';
@@ -132,7 +133,7 @@ export default function AccountTruth() {
     setLiveError(null);
     setLiveEntitlements(null);
     try {
-      const result = await getLiveEntitlements(selected.id);
+      const result = await getLiveEntitlements(selected.id, selected.products || []);
       setLiveEntitlements(result);
     } catch (err) {
       setLiveError(err.message);
@@ -431,29 +432,7 @@ export default function AccountTruth() {
                   {liveLoading ? 'Checking ALIS admin…' : 'Check Live ALIS Entitlements'}
                 </button>
                 {liveError && <div className="notice danger" style={{ marginTop: 8 }}>{liveError}</div>}
-                {liveEntitlements && (
-                  <div style={{ marginTop: 10 }}>
-                    <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '0 0 6px' }}>
-                      {liveEntitlements.enabledLabels.length} of {liveEntitlements.totalFlagCount} entitlements on, as of{' '}
-                      {new Date(liveEntitlements.capturedAt).toLocaleString()} —{' '}
-                      <a href={liveEntitlements.sourceUrl} target="_blank" rel="noreferrer">view in ALIS admin</a>
-                    </p>
-                    {liveEntitlements.enabledLabels.length > 0 ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {liveEntitlements.enabledLabels.map((label) => (
-                          <span
-                            key={label}
-                            style={{ fontSize: 12.5, padding: '3px 10px', borderRadius: 999, background: '#e8f5ec', border: '1px solid #b7dfc3' }}
-                          >
-                            {label}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No entitlements are checked in ALIS admin for this account.</p>
-                    )}
-                  </div>
-                )}
+                {liveEntitlements && <EntitlementCategories result={liveEntitlements} />}
               </>
             )}
           </div>

@@ -75,6 +75,28 @@ async function batchReadContacts(contactIds) {
   return results;
 }
 
+function toKeyContact(c, roleTypeIds) {
+  return {
+    id: c.id,
+    name: [c.properties.firstname, c.properties.lastname].filter(Boolean).join(' ') || '(no name)',
+    title: c.properties.jobtitle || null,
+    email: c.properties.email || null,
+    phone: c.properties.phone || null,
+    url: hubspotRecordUrl('contact', c.id),
+    roles: roleTypeIds
+      .slice()
+      .sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b))
+      .map((id) => ROLE_LABELS_BY_TYPE_ID[id]),
+    _rank: bestRoleRank(roleTypeIds),
+  };
+}
+
+function sortKeyContacts(contacts) {
+  return contacts
+    .sort((a, b) => a._rank - b._rank || a.name.localeCompare(b.name))
+    .map(({ _rank, ...contact }) => contact);
+}
+
 /** Every contact carrying one of the target role labels for this company, each with its role(s) attached, ranked by the most senior/relevant role held (Account Owner and Decision Maker first) then alphabetically. Empty is a real, common answer — most contacts on file for an account carry no special role. */
 async function getKeyContactsForCompany(companyId) {
   const roled = await getRoledContactsForCompany(companyId);
@@ -82,26 +104,60 @@ async function getKeyContactsForCompany(companyId) {
 
   const rolesByContactId = new Map(roled.map((r) => [String(r.contactId), r.roleTypeIds]));
   const contacts = await batchReadContacts(roled.map((r) => r.contactId));
-
-  return contacts
-    .map((c) => {
-      const roleTypeIds = rolesByContactId.get(c.id) || [];
-      return {
-        id: c.id,
-        name: [c.properties.firstname, c.properties.lastname].filter(Boolean).join(' ') || '(no name)',
-        title: c.properties.jobtitle || null,
-        email: c.properties.email || null,
-        phone: c.properties.phone || null,
-        url: hubspotRecordUrl('contact', c.id),
-        roles: roleTypeIds
-          .slice()
-          .sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b))
-          .map((id) => ROLE_LABELS_BY_TYPE_ID[id]),
-        _rank: bestRoleRank(roleTypeIds),
-      };
-    })
-    .sort((a, b) => a._rank - b._rank || a.name.localeCompare(b.name))
-    .map(({ _rank, ...contact }) => contact);
+  return sortKeyContacts(contacts.map((c) => toKeyContact(c, rolesByContactId.get(c.id) || [])));
 }
 
-module.exports = { getKeyContactsForCompany };
+/**
+ * Portfolio-wide version of getRoledContactsForCompany/getKeyContactsForCompany
+ * — one batch associations call per <=100 companies (the v4
+ * companies->contacts batch/read endpoint) instead of one paginated GET per
+ * company, the same pattern hubspotClient.js's batchGetCompanyIdsFor already
+ * uses for tickets/deals. Confirmed live (Sep 2026) to return the identical
+ * associationTypes shape as the single-company GET. Returns
+ * Map<companyId, keyContact[]>; a company with no roled contacts is simply
+ * absent from the map rather than mapped to [].
+ */
+async function getRoledContactsForCompanies(companyIds) {
+  const roledByCompany = new Map();
+  for (const batch of chunk(companyIds, 100)) {
+    const { status, body } = await hubspotRequest('POST', '/crm/v4/associations/companies/contacts/batch/read', {
+      inputs: batch.map((id) => ({ id })),
+    });
+    if (status >= 300 || (body.status && body.status !== 'COMPLETE')) {
+      throw new Error(`HubSpot companies->contacts batch associations failed (${status}): ${JSON.stringify(body)}`);
+    }
+    for (const entry of body.results || []) {
+      const companyId = entry.from?.id;
+      if (!companyId) continue;
+      const roled = [];
+      for (const to of entry.to || []) {
+        const roleTypeIds = (to.associationTypes || []).map((t) => t.typeId).filter((id) => ROLE_LABELS_BY_TYPE_ID[id] != null);
+        if (roleTypeIds.length > 0) roled.push({ contactId: String(to.toObjectId), roleTypeIds });
+      }
+      if (roled.length > 0) roledByCompany.set(companyId, roled);
+    }
+  }
+  return roledByCompany;
+}
+
+/** Every company's key contacts in one pass — see getRoledContactsForCompanies for why this scales portfolio-wide where the single-company version wouldn't. */
+async function getKeyContactsForCompanies(companyIds) {
+  const roledByCompany = await getRoledContactsForCompanies(companyIds);
+  const allContactIds = [...roledByCompany.values()].flatMap((roled) => roled.map((r) => r.contactId));
+  const contacts = await batchReadContacts(allContactIds);
+  const contactById = new Map(contacts.map((c) => [c.id, c]));
+
+  const result = new Map();
+  for (const [companyId, roled] of roledByCompany) {
+    const keyContacts = roled
+      .map((r) => {
+        const c = contactById.get(r.contactId);
+        return c ? toKeyContact(c, r.roleTypeIds) : null;
+      })
+      .filter(Boolean);
+    result.set(companyId, sortKeyContacts(keyContacts));
+  }
+  return result;
+}
+
+module.exports = { getKeyContactsForCompany, getKeyContactsForCompanies };

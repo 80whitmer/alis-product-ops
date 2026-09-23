@@ -113,17 +113,24 @@ router.post('/company-hosts/import', (req, res) => {
   res.json({ imported });
 });
 
-// GET /api/accounts/:id/live-entitlements — logs into ALIS admin and scrapes
-// this account's real Entitlements page. Needs an alis_admin_ids row for
-// this account first (see the two routes above) — 400s with a clear message
-// if there isn't one yet, rather than a confusing scrape failure.
+// GET /api/accounts/:id/live-entitlements?products=A,B,C — logs into ALIS
+// admin and scrapes this account's real Entitlements page, grouped by ALIS
+// product category and cross-checked against `products` (the company's
+// HubSpot alis_products, already in the client's cache — cheaper than this
+// route re-fetching the company just for one property). Needs an
+// alis_admin_ids row for this account first (see the two routes above) —
+// 400s with a clear message if there isn't one yet, rather than a
+// confusing scrape failure.
 router.get('/:id/live-entitlements', async (req, res, next) => {
   try {
     const alisAdminCompanyId = getAlisAdminId(req.params.id);
     if (!alisAdminCompanyId) {
       return res.status(400).json({ error: 'No ALIS Admin Company ID set for this account yet — enter one below before running a live check.' });
     }
-    const result = await getLiveEntitlements(alisAdminCompanyId);
+    const hubspotProducts = typeof req.query.products === 'string'
+      ? req.query.products.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    const result = await getLiveEntitlements(alisAdminCompanyId, hubspotProducts);
     res.json(result);
   } catch (err) {
     next(err);
