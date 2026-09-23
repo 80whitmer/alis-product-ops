@@ -77,6 +77,8 @@ function addRequestsSheet(workbook, requests, sheetName) {
     { header: 'Tier', key: 'tier', width: 8 },
     { header: 'ARR ($)', key: 'arr', width: 14 },
     { header: 'Subject', key: 'subject', width: 50 },
+    { header: 'ALIS Module', key: 'module', width: 18 },
+    { header: 'Enhancement Focus', key: 'enhancementFocus', width: 24 },
     { header: 'Pipeline', key: 'pipeline', width: 18 },
     { header: 'Stage', key: 'stage', width: 18 },
     { header: 'Priority', key: 'priority', width: 10 },
@@ -85,6 +87,7 @@ function addRequestsSheet(workbook, requests, sheetName) {
     { header: 'Last Modified', key: 'lastModifiedAt', width: 12 },
     { header: 'Ticket ID', key: 'ticketId', width: 14 },
     { header: 'Link', key: 'url', width: 40 },
+    { header: 'Pinned Note', key: 'pinnedNote', width: 60 },
   ];
   for (const r of requests) {
     sheet.addRow({
@@ -94,6 +97,8 @@ function addRequestsSheet(workbook, requests, sheetName) {
       tier: r.tier,
       arr: usd(r.arrCents),
       subject: r.subject,
+      module: r.module,
+      enhancementFocus: r.enhancementFocus,
       pipeline: r.pipeline,
       stage: r.stage,
       priority: r.priority,
@@ -102,6 +107,7 @@ function addRequestsSheet(workbook, requests, sheetName) {
       lastModifiedAt: r.lastModifiedAt ? r.lastModifiedAt.slice(0, 10) : '',
       ticketId: r.ticketId,
       url: r.url,
+      pinnedNote: r.pinnedNote,
     });
   }
   sheet.getRow(1).font = { bold: true };

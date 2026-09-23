@@ -310,6 +310,11 @@ export default function AccountTruth() {
           style={{ width: '100%', marginBottom: 10 }}
         />
         <TierFilterPills accounts={searchFiltered} tierFilter={tierFilter} onChange={setTierFilter} />
+        {dashboard.data?.inactiveCompanyCount > 0 && (
+          <p style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '0 0 8px' }}>
+            {dashboard.data.inactiveCompanyCount} inactive accounts (Tier 0/blank with no ARR) are hidden.
+          </p>
+        )}
         {loadError && <div className="notice danger">{loadError}</div>}
         <table>
           <thead>

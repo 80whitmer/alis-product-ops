@@ -13,7 +13,7 @@
  * a batch company-association lookup scales the same way
  * hubspotAccounts.js's company pull already does).
  */
-const { hubspotRequest, getPipelineStageLabels, batchGetCompanyIdsFor, hubspotRecordUrl } = require('./hubspotClient');
+const { hubspotRequest, getPipelineStageLabels, getPropertyOptionLabels, batchGetCompanyIdsFor, hubspotRecordUrl, chunk } = require('./hubspotClient');
 
 const CATEGORY_2_0_LABELS = {
   false: 'General Question',
@@ -21,6 +21,18 @@ const CATEGORY_2_0_LABELS = {
   Project: 'General Project',
   'ALIS Bug': 'ALIS Escalation',
 };
+
+// HubSpot's built-in hs_ticket_category (the fallback when category_2_0 is
+// blank) labels FEATURE_REQUEST as "Enhancement" in the UI, and it shows
+// up in compound values like "Issue;FEATURE_REQUEST" too — alis-hub counts
+// all of these as enhancement asks (its isEnhancementIshCategory).
+const FEATURE_REQUEST_PATTERN = /feature_request/i;
+const HS_TICKET_CATEGORY_LABELS = { GENERAL_INQUIRY: 'General Question' };
+
+// No "focus" field exists on tickets; this form question is the closest
+// (ALIS HQ (Domo) / ALIS App / ALIS Pay / ALIS Connect / AI). Its stored
+// values are placeholders ("Option 1"), so labels are resolved live.
+const ENHANCEMENT_FOCUS_PROPERTY = 'what_type_of_enhancement_request_is_this_';
 
 // Internal team/process-tracking noise, not client support work — same
 // exclusion alis-hub applies at its one shared ticket source, so every
@@ -36,7 +48,51 @@ const TOP_3_STATUS_LABEL = 'Top 3 Enhancements';
 const TICKET_PROPERTIES = [
   'subject', 'hs_pipeline', 'hs_pipeline_stage', 'category_2_0', 'hs_ticket_category',
   'hs_ticket_priority', 'createdate', 'hs_lastmodifieddate', 'closed_date', 'top_3', 'next_step',
+  'alis_module', ENHANCEMENT_FOCUS_PROPERTY, 'hs_pinned_engagement_id',
 ];
+
+function resolveCategory(p) {
+  if (p.category_2_0) return CATEGORY_2_0_LABELS[p.category_2_0] ?? p.category_2_0;
+  const hs = p.hs_ticket_category;
+  if (!hs) return null;
+  if (FEATURE_REQUEST_PATTERN.test(hs)) return 'Enhancement';
+  return HS_TICKET_CATEGORY_LABELS[hs] ?? hs;
+}
+
+function htmlToText(html) {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Map<engagementId, plainText> for pinned notes. A pinned engagement can also be an email/call/task — those ids just don't resolve as notes and are skipped. */
+async function getPinnedNoteText(engagementIds) {
+  const result = new Map();
+  for (const batch of chunk([...new Set(engagementIds)], 100)) {
+    const { status, body } = await hubspotRequest('POST', '/crm/v3/objects/notes/batch/read', {
+      properties: ['hs_note_body'],
+      inputs: batch.map((id) => ({ id })),
+    });
+    // 207 = some ids weren't notes; the ones that were still come back in results.
+    if (status !== 200 && status !== 207) {
+      throw new Error(`HubSpot pinned-note batch read failed (${status}): ${JSON.stringify(body)}`);
+    }
+    for (const note of body.results || []) {
+      const text = note.properties?.hs_note_body ? htmlToText(note.properties.hs_note_body) : '';
+      if (text) result.set(note.id, text);
+    }
+  }
+  return result;
+}
 
 function daysBetween(fromIso, toDate) {
   if (!fromIso) return null;
@@ -85,24 +141,35 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
     // Falls through to raw pipeline/stage IDs below — still useful, just less readable, and isTopThree falls back to the tag-only signal.
   }
 
+  let focusLabels = new Map();
+  try {
+    focusLabels = await getPropertyOptionLabels('tickets', ENHANCEMENT_FOCUS_PROPERTY);
+  } catch {
+    // Falls back to the raw stored value.
+  }
+
   const now = new Date();
   const companyIdsByTicket = await batchGetCompanyIdsFor('tickets', rawTickets.map((t) => t.id));
 
-  return rawTickets
+  const rows = rawTickets
     .map((t) => {
       const p = t.properties;
       const label = stageLabels.get(`${p.hs_pipeline}:${p.hs_pipeline_stage}`);
-      const rawCategory = p.category_2_0 || p.hs_ticket_category || null;
-      const category = rawCategory != null ? (CATEGORY_2_0_LABELS[rawCategory] ?? rawCategory) : null;
+      const category = resolveCategory(p);
       const isOpen = !p.closed_date;
       const companyId = (companyIdsByTicket.get(t.id) || [])[0] || null;
       const company = companyId ? companiesById.get(companyId) : null;
+      const rawFocus = p[ENHANCEMENT_FOCUS_PROPERTY];
       return {
         ticketId: t.id,
         subject: p.subject || '(no subject)',
         category,
+        module: p.alis_module || null,
+        enhancementFocus: rawFocus ? (focusLabels.get(rawFocus) || rawFocus) : null,
+        pinnedEngagementId: p.hs_pinned_engagement_id || null,
+        pinnedNote: null,
         isEscalation: category === 'ALIS Escalation',
-        isEnhancementRequest: category === 'Enhancement' || /enhancement/i.test(p.subject || ''),
+        isEnhancementRequest: category === 'Enhancement' || FEATURE_REQUEST_PATTERN.test(p.hs_ticket_category || '') || /enhancement/i.test(p.subject || ''),
         isTopThree: (p.top_3 != null && p.top_3 !== '') || label?.stage === TOP_3_STATUS_LABEL,
         isOpen,
         pipeline: label?.pipeline || p.hs_pipeline,
@@ -123,6 +190,23 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
       };
     })
     .filter((t) => t.category !== EXCLUDED_CATEGORY);
+
+  // Only escalations/enhancements — the two surfaces that show pinned notes
+  // — so this stays a handful of batch calls, not one per ticket.
+  const pinnedIds = rows
+    .filter((r) => r.pinnedEngagementId && (r.isEscalation || r.isEnhancementRequest))
+    .map((r) => r.pinnedEngagementId);
+  if (pinnedIds.length > 0) {
+    try {
+      const noteText = await getPinnedNoteText(pinnedIds);
+      for (const r of rows) {
+        if (r.pinnedEngagementId) r.pinnedNote = noteText.get(r.pinnedEngagementId) || null;
+      }
+    } catch (err) {
+      console.warn('Pinned-note lookup failed; continuing without notes:', err.message);
+    }
+  }
+  return rows;
 }
 
 /** Merges each account's open/closed Enhancement Request ticket counts onto it — shared by server/api/export.js (Dashboard's Accounts table) and server/api/accounts.js (Account Truth's list) so both surfaces agree. Zero is a real, common state, not missing data. */

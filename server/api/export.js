@@ -30,6 +30,11 @@ function withDealSummary(companies, dealSummaryByCompany) {
   });
 }
 
+/** Tier 0/blank AND no ARR — Aaron, Sep 2026: "filter out all of the tier 0s with no ARR -- they don't seem like active clients." A tier OR any ARR keeps an account in. */
+function isActiveClient(c) {
+  return (c.tier != null && c.tier !== 0) || (c.arrCents || 0) > 0;
+}
+
 /** Joins each implementation project onto its company's context (name/tier/ARR/AM) — same convention as hubspotRequests.js's ticket rows for a deal whose company isn't in the portfolio list. */
 function withProjectCompanyContext(projects, companiesById) {
   return projects.map((p) => {
@@ -62,8 +67,13 @@ router.get('/', async (req, res, next) => {
     const rawCompanies = await getAllHomeOfficeCompanies();
     const dealsWithCompany = await getDealsWithCompanyContext();
     const dealSummaryByCompany = getDealSummaryByCompany(dealsWithCompany);
-    let companies = withDealSummary(rawCompanies, dealSummaryByCompany);
-    const companiesById = new Map(companies.map((c) => [c.id, c]));
+    const allCompanies = withDealSummary(rawCompanies, dealSummaryByCompany);
+    // Joins still resolve against every company, so a ticket or project on
+    // an inactive account keeps its real name instead of "(not in list)";
+    // only the account lists/KPIs drop inactive ones.
+    const companiesById = new Map(allCompanies.map((c) => [c.id, c]));
+    let companies = allCompanies.filter(isActiveClient);
+    const inactiveCompanyCount = allCompanies.length - companies.length;
     const requests = await getTicketHistory({ lookbackDays: 400, companiesById });
     companies = withEnhancementCounts(companies, requests);
     companies = withAlisMappings(companies);
@@ -82,6 +92,7 @@ router.get('/', async (req, res, next) => {
     res.json({
       generatedAt: new Date().toISOString(),
       companies,
+      inactiveCompanyCount,
       requests,
       implementationProjects,
       kpi: kpiSnapshot.current,

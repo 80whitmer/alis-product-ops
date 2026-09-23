@@ -8,6 +8,7 @@ import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.
 import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_COLOR, count as formatCount } from '../components/KpiCharts.jsx';
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
 import OnboardingSection from '../components/OnboardingSection.jsx';
+import { CategoryMixSection, ModuleSection } from '../components/CategoryCharts.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -16,9 +17,13 @@ function slugify(title) {
 
 const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
+// Same buckets and section names as alis-hub's Account Health / Team AM
+// menus (Aaron, Sep 2026: "standardize the menu and the naming
+// conventions"), alphabetized at build time like theirs so a new section
+// can't drift out of order.
 const OVERVIEW_SECTIONS = [
-  { category: 'Highlighted', items: ['Escalations', 'Top 3 Enhancements', 'Enhancement Tickets'] },
-  { category: 'Everything', items: ['Accounts', 'Portfolio KPIs', 'Onboarding'] },
+  { category: 'Accounts', items: ['Accounts', 'Onboarding', 'Portfolio KPIs'].sort((a, b) => a.localeCompare(b)) },
+  { category: 'Tickets', items: ['Enhancement Requests', 'Enhancement Requests: Top 3', 'Tickets by Category Closed', 'Tickets by Category Open', 'Tickets by Module', 'Tickets: Escalation'].sort((a, b) => a.localeCompare(b)) },
 ];
 
 
@@ -275,7 +280,10 @@ function RequestRow({ r, expanded, onToggle }) {
         <td>{r.category || '—'}</td>
         <td>{r.tier ?? '—'}</td>
         <td>{usd(r.arrCents)}</td>
-        <td className="max-w-[240px] truncate" title={r.subject}>{r.subject}</td>
+        <td className="max-w-[240px] truncate" title={r.subject}>
+          {r.pinnedNote && <span className="text-[10px] font-semibold text-accent-600 mr-1" title="Has a pinned note — expand to read">NOTE</span>}
+          {r.subject}
+        </td>
         <td>{r.stage}</td>
         <td>{r.priority || '—'}</td>
         <td>{r.ageDays != null ? `${r.ageDays}d` : '—'}</td>
@@ -291,8 +299,16 @@ function RequestRow({ r, expanded, onToggle }) {
                 <div><span className="text-neutral-400">Ticket ID:</span> {r.ticketId}</div>
                 <div><span className="text-neutral-400">Created:</span> {r.createdAt ? r.createdAt.slice(0, 10) : '—'}</div>
                 <div><span className="text-neutral-400">Last modified:</span> {r.lastModifiedAt ? r.lastModifiedAt.slice(0, 10) : '—'}</div>
+                <div><span className="text-neutral-400">ALIS Module:</span> {r.module || <span className="text-accent-600">Not set</span>}</div>
+                {r.isEnhancementRequest && <div><span className="text-neutral-400">Focus:</span> {r.enhancementFocus || 'Not set'}</div>}
                 {r.url && <div><a href={r.url} target="_blank" rel="noreferrer">Open in HubSpot &rarr;</a></div>}
               </div>
+              {r.pinnedNote && (
+                <div className="mt-3 border border-neutral-200 rounded-lg bg-white p-3">
+                  <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide mb-1">Pinned note</p>
+                  <p className="text-xs text-neutral-700 whitespace-pre-wrap">{r.pinnedNote}</p>
+                </div>
+              )}
             </div>
           </td>
         </tr>
@@ -320,7 +336,9 @@ function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) 
       r.companyName?.toLowerCase().includes(q) ||
       r.accountManagerName?.toLowerCase().includes(q) ||
       r.category?.toLowerCase().includes(q) ||
-      r.subject?.toLowerCase().includes(q)
+      r.module?.toLowerCase().includes(q) ||
+      r.subject?.toLowerCase().includes(q) ||
+      r.pinnedNote?.toLowerCase().includes(q)
     );
   }, [requests, search]);
 
@@ -332,7 +350,7 @@ function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) 
     <>
       {showSearch && (
         <input
-          placeholder="Search company, account manager, issue type, or subject…"
+          placeholder="Search company, account manager, issue type, module, subject, or pinned note…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full mb-4"
@@ -484,6 +502,18 @@ export default function Dashboard() {
     const byAm = data?.kpi?.byAm || {};
     return Object.keys(byAm).sort((a, b) => (byAm[b]?.arrCents || 0) - (byAm[a]?.arrCents || 0));
   }, [data]);
+  // Scoped to tickets on active Home Office accounts, same as alis-hub's
+  // Tickets by Category (which pulls tickets per Home Office) — excludes
+  // unassociated tickets, ones linked only to a community record, and
+  // inactive accounts.
+  const accountTickets = useMemo(() => {
+    if (!data) return [];
+    const activeIds = new Set(data.companies.map((c) => c.id));
+    return data.requests.filter((r) => r.companyId && activeIds.has(r.companyId));
+  }, [data]);
+  const openTickets = useMemo(() => accountTickets.filter((r) => r.isOpen), [accountTickets]);
+  const closedTickets = useMemo(() => accountTickets.filter((r) => !r.isOpen), [accountTickets]);
+  const openEscalationsMissingModule = useMemo(() => escalations.filter((r) => !r.module), [escalations]);
   const unassignedCompanies = useMemo(
     () => (data ? data.companies.filter((c) => c.tier == null || c.tier === 0) : []),
     [data]
@@ -527,16 +557,16 @@ export default function Dashboard() {
               <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" tooltip="Every Home Office account in HubSpot" />
               <StatTile label="Communities" value={totalCommunities.toLocaleString()} jumpTo="Accounts" tooltip="Sum of each account's child-company count in HubSpot — one per physical community/location" />
               <StatTile label="Capacity (beds)" value={totalCapacityBeds.toLocaleString()} jumpTo="Accounts" tooltip="Sum of HubSpot's company_total_capacity field — hand-maintained per account, not a live ALIS pull, so treat as directional" />
-              <StatTile label="Enhancement Tickets" value={enhancementRequests.length} sub="by category" accent jumpTo="Enhancement Tickets" tooltip="Every active ticket whose HubSpot category is a feature/enhancement request" />
-              <StatTile label="Top 3 Enhancements" value={top3Enhancements.length} accent jumpTo="Top 3 Enhancements" tooltip="Tickets an account manager has explicitly staged as one of their account's top 3 priorities" />
-              <StatTile label="Escalations" value={escalations.length} accent jumpTo="Escalations" tooltip="Tickets categorized ALIS Escalation ('ALIS Bug' in HubSpot's raw category_2_0 field)" />
+              <StatTile label="Enhancement Requests" value={enhancementRequests.length} sub="by category" accent jumpTo="Enhancement Requests" tooltip="Every open ticket categorized Enhancement / Feature Request, or titled as an enhancement" />
+              <StatTile label="Enhancement Requests: Top 3" value={top3Enhancements.length} accent jumpTo="Enhancement Requests: Top 3" tooltip="Tickets an account manager has explicitly staged as one of their account's top 3 priorities" />
+              <StatTile label="Tickets: Escalation" value={escalations.length} accent jumpTo="Tickets: Escalation" tooltip="Tickets categorized ALIS Escalation ('ALIS Bug' in HubSpot's raw category_2_0 field)" />
             </div>
             <QuickJumpNav sections={OVERVIEW_SECTIONS} />
           </SectionCard>
 
           <SectionCard
             title="Accounts"
-            description="Every Home Office account, its account manager, tier, and ARR — search to narrow."
+            description={`Every active Home Office account, its account manager, tier, and ARR — search to narrow.${data.inactiveCompanyCount ? ` ${data.inactiveCompanyCount} inactive accounts (Tier 0/blank with no ARR) are hidden.` : ''}`}
             defaultExpanded={false}
             action={<SectionExportButton onExport={() => exportAccountsToExcel(filteredAccounts, data.generatedAt)} />}
           >
@@ -639,9 +669,8 @@ export default function Dashboard() {
                 <SectionExportButton onExport={() => exportAccountsToExcel(unassignedCompanies, data.generatedAt)} />
               </div>
               <p className="text-xs text-neutral-500 mb-3">
-                Accounts with no Client Tier set in HubSpot — mostly newer accounts still in onboarding
-                (confirmed live, Sep 2026: recently-created companies come through from HubSpot with no
-                tier and no ARR yet), not a data-capture gap in this app.
+                Accounts with ARR but no Client Tier set in HubSpot — these need a tier assigned.
+                Accounts with neither a tier nor ARR are treated as inactive and hidden app-wide.
               </p>
               {unassignedCompanies.length === 0 ? (
                 <p className="text-sm text-neutral-500 italic">Every account currently has a tier set.</p>
@@ -681,35 +710,66 @@ export default function Dashboard() {
           </SectionCard>
 
           <SectionCard
-            title="Top 3 Enhancements"
+            title="Enhancement Requests: Top 3"
             description="Every ticket staged as one of an account's Top 3 Enhancement asks — the requests carrying the most explicit account-level priority signal available."
             accent
             defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportRequestsToExcel(top3Enhancements, 'Top 3 Enhancements', data.generatedAt)} />}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(top3Enhancements, 'Enhancement Requests Top 3', data.generatedAt)} />}
           >
             <EnhancementCharts openItems={top3Enhancements} closedItems={closedTop3Enhancements} topThreeOnly />
             <RequestsTable requests={top3Enhancements} emptyLabel="No tickets currently staged as Top 3 Enhancements." />
           </SectionCard>
 
           <SectionCard
-            title="Escalations"
+            title="Tickets: Escalation"
             description="Every ticket categorized as an ALIS Escalation, portfolio-wide."
             accent
             defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportRequestsToExcel(escalations, 'Escalations', data.generatedAt)} />}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(escalations, 'Tickets Escalation', data.generatedAt)} />}
           >
             <EscalationCharts openItems={escalations} closedItems={closedEscalations} />
             <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
           </SectionCard>
 
           <SectionCard
-            title="Enhancement Tickets"
-            description="Every ticket categorized as a feature/enhancement request, portfolio-wide — broader than Top 3 Enhancements above."
+            title="Tickets by Module"
+            description="Escalations by HubSpot's ALIS Module field — open vs. closed, split by tier — plus every open escalation still missing a module."
+            accent
             defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportRequestsToExcel(enhancementRequests, 'Enhancement Tickets', data.generatedAt)} />}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(openEscalationsMissingModule, 'Escalations Missing Module', data.generatedAt)} />}
+          >
+            <ModuleSection openItems={escalations} closedItems={closedEscalations} />
+            <h3 className="font-semibold text-primary-900 text-sm mb-1">Open Escalations Missing a Module ({openEscalationsMissingModule.length})</h3>
+            <p className="text-xs text-neutral-500 mb-3">Open in HubSpot and set ALIS Module so these show up in the chart above. Export includes just this list.</p>
+            <RequestsTable requests={openEscalationsMissingModule} emptyLabel="Every open escalation has a module set." />
+          </SectionCard>
+
+          <SectionCard
+            title="Enhancement Requests"
+            description="Every ticket categorized as an Enhancement / Feature Request (or titled as one), portfolio-wide — broader than Enhancement Requests: Top 3 above."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(enhancementRequests, 'Enhancement Requests', data.generatedAt)} />}
           >
             <EnhancementCharts openItems={enhancementRequests} closedItems={closedEnhancementRequests} />
             <RequestsTable requests={enhancementRequests} emptyLabel="No enhancement requests right now." />
+          </SectionCard>
+
+          <SectionCard
+            title="Tickets by Category Open"
+            description="Every open ticket on an active Home Office account — bars drill into enhancement requests by focus and tier; pie shows the full category mix."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(openTickets, 'Tickets Open', data.generatedAt)} />}
+          >
+            <CategoryMixSection items={openTickets} status="open" />
+          </SectionCard>
+
+          <SectionCard
+            title="Tickets by Category Closed"
+            description="Every ticket on an active Home Office account closed in the ~13-month lookback — same breakdown as the open view."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(closedTickets, 'Tickets Closed', data.generatedAt)} />}
+          >
+            <CategoryMixSection items={closedTickets} status="closed" />
           </SectionCard>
         </>
       )}

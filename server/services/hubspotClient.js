@@ -141,4 +141,23 @@ async function batchGetCompanyIdsFor(fromObjectType, objectIds) {
   return result;
 }
 
-module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE, getPipelineStageLabels, batchGetCompanyIdsFor };
+/** Map<internalValue, displayLabel> for an enumeration property — some portal fields store placeholder values ("Option 1") behind real labels ("ALIS HQ (Domo)"). Cached for the process lifetime, same as pipeline labels. */
+const propertyOptionLabelCachePromises = new Map();
+async function getPropertyOptionLabels(objectType, propertyName) {
+  const key = `${objectType}:${propertyName}`;
+  if (!propertyOptionLabelCachePromises.has(key)) {
+    propertyOptionLabelCachePromises.set(key, (async () => {
+      const { status, body } = await hubspotRequest('GET', `/crm/v3/properties/${objectType}/${propertyName}`);
+      if (status !== 200) {
+        throw new Error(`HubSpot ${key} property lookup failed (${status}): ${JSON.stringify(body)}`);
+      }
+      return new Map((body.options || []).map((o) => [o.value, o.label]));
+    })().catch((err) => {
+      propertyOptionLabelCachePromises.delete(key);
+      throw err;
+    }));
+  }
+  return propertyOptionLabelCachePromises.get(key);
+}
+
+module.exports = { hubspotRequest, chunk, hubspotRecordUrl, HUBSPOT_OBJECT_TYPE, getPipelineStageLabels, getPropertyOptionLabels, batchGetCompanyIdsFor };
