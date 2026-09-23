@@ -1,19 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  getAccounts, getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements,
+  getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements,
   setCompanyHost, importCompanyHosts, clearCompanyHost,
 } from '../api.js';
 import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/alisAdminIdTemplate.js';
 import { exportCompanyHostTemplate, parseCompanyHostTemplate } from '../utils/companyHostTemplate.js';
+import { useDataCache } from '../DataCache.jsx';
 
 function formatCents(cents) {
   if (cents == null) return '—';
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+function formatTimestamp(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export default function AccountTruth() {
-  const [accounts, setAccounts] = useState([]);
-  const [loadError, setLoadError] = useState(null);
+  const { accounts: accountsState, refreshAccounts, ensureAccountsLoaded, patchAccountsList, markUpdated } = useDataCache();
+  const { list: accounts, loading: accountsLoading, error: loadError, lastRefreshedAt, alisAdminIdsUpdatedAt, companyHostsUpdatedAt } = accountsState;
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [truth, setTruth] = useState(null);
@@ -38,16 +44,15 @@ export default function AccountTruth() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState(null);
 
-  // Same StrictMode double-invoke guard as Dashboard.jsx — this route now
-  // runs the same expensive portfolio-wide ticket-history pull
-  // (server/api/accounts.js) as /api/export, so a second concurrent fetch
-  // here is exactly as likely to trip HubSpot's rate limit.
-  const initialLoadRef = useRef(false);
+  // Loads once per app session (cached in DataCache.jsx) rather than on
+  // every visit to this page — Aaron, Sep 2026: same "manual refresh,
+  // cached across screens" ask as the Dashboard. This route runs the same
+  // expensive portfolio-wide ticket-history pull /api/export does (for the
+  // Enhancement Request counts), so re-running it on every navigation was
+  // exactly as costly and exactly as unnecessary.
   useEffect(() => {
-    if (initialLoadRef.current) return;
-    initialLoadRef.current = true;
-    getAccounts().then((d) => setAccounts(d.companies)).catch((err) => setLoadError(err.message));
-  }, []);
+    ensureAccountsLoaded();
+  }, [ensureAccountsLoaded]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -91,14 +96,14 @@ export default function AccountTruth() {
       .finally(() => setTruthLoading(false));
   }
 
-  /** Merges a fresh alisAdminCompanyId onto one account, in both the list and (if it's the current one) the selected detail — avoids a full refetch after a save. */
+  /** Merges a fresh alisAdminCompanyId onto one account, in both the cached list and (if it's the current one) the selected detail — avoids a full refetch after a save. */
   function applyAlisAdminId(hubspotCompanyId, alisAdminCompanyId) {
-    setAccounts((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, alisAdminCompanyId } : a)));
+    patchAccountsList((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, alisAdminCompanyId } : a)));
     setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, alisAdminCompanyId } : prev));
   }
 
   function applyCompanyHost(hubspotCompanyId, companyHost) {
-    setAccounts((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, companyHost } : a)));
+    patchAccountsList((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, companyHost } : a)));
     setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, companyHost } : prev));
   }
 
@@ -110,6 +115,7 @@ export default function AccountTruth() {
     try {
       await setAlisAdminId(selected.id, value, selected.name);
       applyAlisAdminId(selected.id, value);
+      markUpdated('alisAdminIdsUpdatedAt');
       setEditingAlisId(false);
     } catch (err) {
       setAlisIdError(err.message);
@@ -163,6 +169,7 @@ export default function AccountTruth() {
       if (rows.length === 0) throw new Error('No rows with an ALIS Admin Company ID filled in were found in this file.');
       const res = await importAlisAdminIds(rows);
       for (const r of rows) if (r.hubspotCompanyId) applyAlisAdminId(r.hubspotCompanyId, r.alisAdminCompanyId);
+      markUpdated('alisAdminIdsUpdatedAt');
       setImportResult(`Imported ${res.imported} ALIS Admin Company ID${res.imported === 1 ? '' : 's'}.`);
     } catch (err) {
       setImportError(err.message);
@@ -179,6 +186,7 @@ export default function AccountTruth() {
     try {
       await setCompanyHost(selected.id, value, selected.name);
       applyCompanyHost(selected.id, value);
+      markUpdated('companyHostsUpdatedAt');
       setEditingHost(false);
     } catch (err) {
       setHostError(err.message);
@@ -217,6 +225,7 @@ export default function AccountTruth() {
       if (rows.length === 0) throw new Error('No rows with an ALIS Subdomain filled in were found in this file.');
       const res = await importCompanyHosts(rows);
       for (const r of rows) if (r.hubspotCompanyId) applyCompanyHost(r.hubspotCompanyId, r.companyHost);
+      markUpdated('companyHostsUpdatedAt');
       setImportHostsResult(`Imported ${res.imported} ALIS subdomain${res.imported === 1 ? '' : 's'} (${rows.length - res.imported} row${rows.length - res.imported === 1 ? '' : 's'} had no matching HubSpot Company ID and were skipped).`);
     } catch (err) {
       setImportHostsError(err.message);
@@ -241,7 +250,13 @@ export default function AccountTruth() {
       </div>
 
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <button className="secondary" onClick={refreshAccounts} disabled={accountsLoading} style={{ marginRight: 8 }}>
+              {accountsLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+            {lastRefreshedAt && <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Last refreshed {formatTimestamp(lastRefreshedAt)}</span>}
+          </div>
           <button className="secondary" onClick={() => setShowUtilities((v) => !v)}>
             {showUtilities ? 'Hide Utilities' : 'Utilities'}
           </button>
@@ -253,6 +268,7 @@ export default function AccountTruth() {
               ALIS Admin Company IDs — the numeric id from the URL of an account's
               admin.alisonline.com Entitlements page. Fill these in gradually; no automated
               way exists to resolve them from HubSpot alone.
+              {alisAdminIdsUpdatedAt && <> Last imported {formatTimestamp(alisAdminIdsUpdatedAt)}.</>}
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <button className="secondary" onClick={handleDownloadTemplate}>📋 Download Template</button>
@@ -270,6 +286,7 @@ export default function AccountTruth() {
               ALIS Subdomains — e.g. "vivaeast" for vivaeast.alisonline.com. Same file format as
               alis-hub's own ALIS Subdomains template, so an already-completed one can be
               uploaded here as-is.
+              {companyHostsUpdatedAt && <> Last imported {formatTimestamp(companyHostsUpdatedAt)}.</>}
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <button className="secondary" onClick={handleDownloadHostTemplate}>📋 Download Template</button>

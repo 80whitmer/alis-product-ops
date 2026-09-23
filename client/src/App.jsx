@@ -1,4 +1,5 @@
 import { Routes, Route, NavLink } from 'react-router-dom';
+import { DataCacheProvider } from './DataCache.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import AccountTruth from './pages/AccountTruth.jsx';
 import DecisionLog from './pages/DecisionLog.jsx';
@@ -47,16 +48,18 @@ export default function App() {
       </header>
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/accounts" element={<AccountTruth />} />
-          <Route path="/decisions" element={<DecisionLog />} />
-          {/* Shelved — reachable directly, not in nav. See docs/CONTEXT.md. */}
-          <Route path="/queue" element={<RequestQueue />} />
-          <Route path="/pods" element={<PodCapacity />} />
-          <Route path="/one-pagers" element={<OnePagers />} />
-          <Route path="/finance" element={<FinanceReconciliation />} />
-        </Routes>
+        <DataCacheProvider>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/accounts" element={<AccountTruth />} />
+            <Route path="/decisions" element={<DecisionLog />} />
+            {/* Shelved — reachable directly, not in nav. See docs/CONTEXT.md. */}
+            <Route path="/queue" element={<RequestQueue />} />
+            <Route path="/pods" element={<PodCapacity />} />
+            <Route path="/one-pagers" element={<OnePagers />} />
+            <Route path="/finance" element={<FinanceReconciliation />} />
+          </Routes>
+        </DataCacheProvider>
       </main>
     </div>
   );

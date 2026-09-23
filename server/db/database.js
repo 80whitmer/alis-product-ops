@@ -223,8 +223,18 @@ function deleteCompanyHost(hubspotCompanyId) {
   run('DELETE FROM company_hosts WHERE hubspot_company_id = ?', [hubspotCompanyId]);
 }
 
+// Allowlisted, not arbitrary — `table` is interpolated directly into SQL below.
+const TABLES_WITH_UPDATED_AT = new Set(['alis_admin_ids', 'company_hosts']);
+
+/** Most recent updated_at across a table — "Last imported"/"Last updated" captions near each Utilities template (Aaron, Sep 2026: "make clear near refresh button when refresh was last actioned for all refresh and template importers"). Null when the table is empty (nothing imported yet). */
+function getMaxUpdatedAt(table) {
+  if (!TABLES_WITH_UPDATED_AT.has(table)) throw new Error(`getMaxUpdatedAt: unknown table "${table}"`);
+  const rows = queryAll(`SELECT MAX(updated_at) AS max_updated_at FROM ${table}`);
+  return rows[0]?.max_updated_at ?? null;
+}
+
 module.exports = {
   initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory,
   listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
-  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
+  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, getMaxUpdatedAt,
 };

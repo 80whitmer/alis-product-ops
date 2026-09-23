@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getExportData, getKeyContacts, getKpiHistory } from '../api.js';
+import { getKeyContacts } from '../api.js';
+import { useDataCache } from '../DataCache.jsx';
 import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
@@ -129,6 +130,12 @@ function StatTile({ label, value, sub, accent, jumpTo, tooltip, wide }) {
 function usd(cents) {
   if (cents == null) return '—';
   return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+/** "Last refreshed"/"Last imported" captions across this app all use this same point-in-time format — Aaron, Sep 2026: "capture the point in time and make clear near refresh button when refresh was last actioned." */
+function formatTimestamp(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /** The per-section "Export to Excel" button in a SectionCard's header — same export utility as the holistic one, just scoped to this section's own rows. */
@@ -354,9 +361,8 @@ function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) 
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { dashboard, refreshDashboard, ensureDashboardLoaded } = useDataCache();
+  const { data, loading, error, kpiHistory } = dashboard;
   const [exporting, setExporting] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   const [accountSort, setAccountSort] = useState({ key: null, dir: 'asc' });
@@ -364,7 +370,6 @@ export default function Dashboard() {
   const [contactsByAccount, setContactsByAccount] = useState({});
   const [contactsLoadingId, setContactsLoadingId] = useState(null);
   const [contactsErrorByAccount, setContactsErrorByAccount] = useState({});
-  const [kpiHistory, setKpiHistory] = useState({ tier: [], portfolio: [], arrBand: [] });
 
   function handleAccountSort(key) {
     setAccountSort((prev) => {
@@ -386,35 +391,15 @@ export default function Dashboard() {
     }
   }
 
-  function load() {
-    setLoading(true);
-    setError(null);
-    getExportData()
-      .then((d) => {
-        setData(d);
-        // /api/export just (re-)wrote today's KPI snapshot row — refetch
-        // history so a Refresh mid-session reflects it immediately instead
-        // of only after a full page reload.
-        getKpiHistory().then(setKpiHistory).catch(() => {});
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }
-
-  // React 18 StrictMode double-invokes effects in dev, which fired this
-  // twice on every page load — two concurrent /api/export pipelines each
-  // hitting HubSpot's company/deal/ticket search endpoints, doubling the
-  // near-simultaneous request rate and tripping its per-second rate limit
-  // (confirmed live, Sep 2026: "HubSpot deal search failed (429)... You
-  // have reached your secondly limit"). initialLoadRef survives
-  // StrictMode's effect/cleanup/effect replay on the same instance, so the
-  // second invocation is a no-op instead of a second fetch.
-  const initialLoadRef = useRef(false);
+  // Loads once per app session (cached in DataCache.jsx, above the routes,
+  // so it survives navigating away and back) rather than on every mount —
+  // Aaron, Sep 2026: "I don't like the auto refresh... make the refresh
+  // manual and the data cached so it remains available when you toggle
+  // between screens." ensureDashboardLoaded no-ops after the first real
+  // load, including StrictMode's double-invoke of this same effect.
   useEffect(() => {
-    if (initialLoadRef.current) return;
-    initialLoadRef.current = true;
-    load();
-  }, []);
+    ensureDashboardLoaded();
+  }, [ensureDashboardLoaded]);
 
   async function handleExport() {
     if (!data) return;
@@ -487,13 +472,18 @@ export default function Dashboard() {
             whatever you're already using — the #bi-priority sheet, DOMO, a pivot table.
           </p>
         </div>
-        <div className="flex gap-3">
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button className="btn-accent" onClick={handleExport} disabled={!data || exporting}>
-            {exporting ? 'Building file…' : 'Export to Excel'}
-          </button>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex gap-3">
+            <button className="btn-secondary" onClick={refreshDashboard} disabled={loading}>
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button className="btn-accent" onClick={handleExport} disabled={!data || exporting}>
+              {exporting ? 'Building file…' : 'Export to Excel'}
+            </button>
+          </div>
+          {dashboard.lastRefreshedAt && (
+            <p className="text-xs text-neutral-400">Last refreshed {formatTimestamp(dashboard.lastRefreshedAt)}</p>
+          )}
         </div>
       </div>
 

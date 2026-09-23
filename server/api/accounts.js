@@ -7,7 +7,7 @@ const { getTicketHistory, withEnhancementCounts } = require('../services/hubspot
 const { getLiveEntitlements } = require('../services/alisEntitlements');
 const {
   listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
-  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
+  listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, getMaxUpdatedAt,
 } = require('../db/database');
 
 // GET /api/accounts — portfolio-wide, no owner scoping. Same
@@ -29,7 +29,12 @@ router.get('/', async (req, res, next) => {
       alisAdminCompanyId: alisAdminIdByCompany.get(c.id) || null,
       companyHost: companyHostByCompany.get(c.id) || null,
     }));
-    res.json({ companies });
+    res.json({
+      companies,
+      generatedAt: new Date().toISOString(),
+      alisAdminIdsUpdatedAt: getMaxUpdatedAt('alis_admin_ids'),
+      companyHostsUpdatedAt: getMaxUpdatedAt('company_hosts'),
+    });
   } catch (err) {
     next(err);
   }
