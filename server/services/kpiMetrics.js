@@ -1,14 +1,11 @@
 /**
- * Portfolio-aggregate KPI metrics grouped by Client Tier, Account Manager,
- * or an ARR band — the "ARR by Tier / Companies by Tier / Communities by
- * Tier / Companies by ARR / [metric] Added This Year by Tier" views (Aaron,
- * Sep 2026), ported from alis-hub's TeamAmDashboard.jsx equivalents, plus
- * an Account Manager breakout of the same tier metrics (Aaron: "would love
- * that on the AM boards as well") — this app has no per-AM dashboard
- * pages by design (see docs/CONTEXT.md), so "AM boards" here means an
- * Account Manager axis on the same portfolio-wide Portfolio KPIs section,
- * not a separate page per AM. Computed client-side from the same
- * `companies` array export.js already builds — no extra HubSpot calls.
+ * Portfolio-aggregate KPI metrics grouped by Client Tier or an ARR band —
+ * the "ARR by Tier / Companies by Tier / Communities by Tier / Companies by
+ * ARR / ARR Added This Year by Tier" views (Aaron, Sep 2026), ported from
+ * alis-hub's TeamAmDashboard.jsx equivalents. No Account Manager axis here
+ * (Aaron, Sep 2026: by-AM KPIs belong on the AM boards, not the product
+ * team's). Computed from the same `companies` array export.js already
+ * builds — no extra HubSpot calls.
  *
  * Average ARR/capacity per company or per community aren't tracked as
  * their own metric_key — they're derived client-side (see
@@ -28,7 +25,7 @@ const TIER_KEYS = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Unassigned'];
 
 const METRIC_KEYS = [
   'arrCents', 'companyCount', 'communityCount', 'totalCapacityBeds',
-  'arrAddedThisYearCents', 'companiesAddedThisYear', 'communitiesAddedThisYear',
+  'arrAddedThisYearCents', 'companiesContributingArrThisYear', 'communitiesContributingArrThisYear',
 ];
 
 // Ordered so the bar chart reads low-to-high ARR left to right.
@@ -53,45 +50,38 @@ function arrBandFor(arrCents) {
 function emptyBucket() {
   return {
     arrCents: 0, companyCount: 0, communityCount: 0, totalCapacityBeds: 0,
-    arrAddedThisYearCents: 0, companiesAddedThisYear: 0, communitiesAddedThisYear: 0,
+    arrAddedThisYearCents: 0, companiesContributingArrThisYear: 0, communitiesContributingArrThisYear: 0,
   };
 }
 
 /**
- * Rolls every company up by tier, by Account Manager, and into a
- * 'portfolio' total plus an ARR-band histogram, returning both `current`
- * (for immediate rendering — no need to wait on a history fetch) and
- * `rows` (flattened for database.recordKpiMetricSnapshots). "Communities
- * added this year" is a real approximation, not exact: it sums the
- * CURRENT community count of companies whose Home Office record was
- * created this year, since individual communities don't carry their own
- * "date added" — a community added mid-year to an OLDER Home Office
- * record won't be counted, same directional-not-exact tradeoff
- * `totalCapacity` already carries elsewhere in this app.
+ * Rolls every company up by tier and into a 'portfolio' total plus an
+ * ARR-band histogram, returning both `current` (for immediate rendering)
+ * and `rows` (flattened for database.recordKpiMetricSnapshots).
+ * "Contributing ARR this year" = the company has closed-won ARR this
+ * calendar year (arrAddedThisYearCents > 0). The community version sums
+ * those companies' CURRENT community counts — deals are associated with
+ * the Home Office, not the individual community, so which communities a
+ * deal covered isn't knowable here; directional, not exact.
  */
 function computeTierSnapshotRows(companies) {
   const byTier = new Map(TIER_KEYS.map((k) => [k, emptyBucket()]));
-  const byAm = new Map();
   const portfolio = emptyBucket();
   const byArrBand = new Map();
-  const year = new Date().getFullYear();
 
   for (const c of companies) {
     const tierBucket = byTier.get(tierLabel(c.tier));
-    const amKey = c.accountManagerName || 'Unassigned';
-    if (!byAm.has(amKey)) byAm.set(amKey, emptyBucket());
-    const amBucket = byAm.get(amKey);
-    const addedThisYear = c.createdAt && new Date(c.createdAt).getFullYear() === year;
+    const contributedArr = (c.arrAddedThisYearCents || 0) > 0;
 
-    for (const target of [tierBucket, amBucket, portfolio]) {
+    for (const target of [tierBucket, portfolio]) {
       target.arrCents += c.arrCents || 0;
       target.companyCount += 1;
       target.communityCount += c.communityCount || 0;
       target.totalCapacityBeds += c.totalCapacity || 0;
       target.arrAddedThisYearCents += c.arrAddedThisYearCents || 0;
-      if (addedThisYear) {
-        target.companiesAddedThisYear += 1;
-        target.communitiesAddedThisYear += c.communityCount || 0;
+      if (contributedArr) {
+        target.companiesContributingArrThisYear += 1;
+        target.communitiesContributingArrThisYear += c.communityCount || 0;
       }
     }
 
@@ -106,11 +96,6 @@ function computeTierSnapshotRows(companies) {
   for (const [tierKey, m] of byTier) {
     for (const metricKey of METRIC_KEYS) {
       rows.push({ scope: 'tier', scopeKey: tierKey, metricKey, value: m[metricKey] });
-    }
-  }
-  for (const [amKey, m] of byAm) {
-    for (const metricKey of METRIC_KEYS) {
-      rows.push({ scope: 'am', scopeKey: amKey, metricKey, value: m[metricKey] });
     }
   }
   for (const metricKey of METRIC_KEYS) {
@@ -131,7 +116,6 @@ function computeTierSnapshotRows(companies) {
     rows,
     current: {
       byTier: Object.fromEntries(byTier),
-      byAm: Object.fromEntries(byAm),
       portfolio,
       byArrBand: ARR_BANDS.map((b) => {
         const byTierInBand = byArrBand.get(b.key) || new Map();

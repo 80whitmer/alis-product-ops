@@ -495,13 +495,6 @@ export default function Dashboard() {
     () => (data ? data.requests.filter((r) => !r.isOpen && r.isEnhancementRequest) : []),
     [data]
   );
-  // AM names present in the current snapshot, sorted by ARR desc (busiest
-  // book first) — a fixed order so the "by AM" bar charts don't reshuffle
-  // as data.kpi.byAm's own key insertion order shifts between refreshes.
-  const amKeysByArr = useMemo(() => {
-    const byAm = data?.kpi?.byAm || {};
-    return Object.keys(byAm).sort((a, b) => (byAm[b]?.arrCents || 0) - (byAm[a]?.arrCents || 0));
-  }, [data]);
   // Scoped to tickets on active Home Office accounts, same as alis-hub's
   // Tickets by Category (which pulls tickets per Home Office) — excludes
   // unassociated tickets, ones linked only to a community record, and
@@ -631,13 +624,13 @@ export default function Dashboard() {
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={usd}
             />
             <KpiTierSection
-              title={`Companies Added (${new Date().getFullYear()}) by Tier`} metricKey="companiesAddedThisYear" name="Companies Added"
-              description="Accounts whose HubSpot Home Office record was created this calendar year, by tier."
+              title={`Companies Contributing ARR (${new Date().getFullYear()}) by Tier`} metricKey="companiesContributingArrThisYear" name="Companies"
+              description="Accounts with at least one deal closed-won this calendar year carrying ARR, by tier."
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
             <KpiTierSection
-              title={`Communities Added (${new Date().getFullYear()}) by Tier`} metricKey="communitiesAddedThisYear" name="Communities Added"
-              description="Approximation: current community count of accounts created this calendar year — a community added mid-year to an older account isn't counted, since communities don't carry their own add date."
+              title={`Communities Contributing ARR (${new Date().getFullYear()}) by Tier`} metricKey="communitiesContributingArrThisYear" name="Communities"
+              description="Approximation: current community count of the accounts above — deals attach to the Home Office, not the individual community, so which communities a deal covered isn't tracked."
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
             <AverageMetricSection
@@ -652,15 +645,6 @@ export default function Dashboard() {
               title="Average Capacity (beds) per Community by Tier" numeratorKey="totalCapacityBeds" denominatorKey="communityCount"
               description="Average community size, by tier — beds per community, not per company."
               buckets={data.kpi.byTier} history={kpiHistory.tier} scopeKeys={TIER_ORDER} colorFor={(t) => TIER_COLOR[t]} formatValue={formatCount}
-            />
-            <h3 className="font-semibold text-primary-900 text-sm mt-2 mb-3">By Account Manager</h3>
-            <AverageMetricSection
-              title="Average ARR per Company by AM" numeratorKey="arrCents" denominatorKey="companyCount"
-              buckets={data.kpi.byAm} history={kpiHistory.am} scopeKeys={amKeysByArr} formatValue={usd}
-            />
-            <AverageMetricSection
-              title="Average Capacity (beds) per Community by AM" numeratorKey="totalCapacityBeds" denominatorKey="communityCount"
-              buckets={data.kpi.byAm} history={kpiHistory.am} scopeKeys={amKeysByArr} formatValue={formatCount}
             />
 
             <div className="mt-2">

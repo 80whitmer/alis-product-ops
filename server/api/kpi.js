@@ -10,7 +10,6 @@ const { getKpiMetricHistory } = require('../db/database');
 router.get('/history', (req, res) => {
   res.json({
     tier: getKpiMetricHistory('tier'),
-    am: getKpiMetricHistory('am'),
     portfolio: getKpiMetricHistory('portfolio'),
     arrBand: getKpiMetricHistory('arr_band'),
   });
