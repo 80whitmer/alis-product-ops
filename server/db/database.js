@@ -42,6 +42,32 @@ async function initDb() {
     );
   `);
 
+  // Generic "one row per metric per scope per day" snapshot table — same
+  // shape as alis-hub's kpi_metric_history (server/db/database.js there),
+  // ported since it already solves "trending" for exactly this kind of
+  // portfolio-aggregate number without needing a scheduled job: a point is
+  // captured as a side effect every time the Dashboard loads/refreshes
+  // (see server/api/export.js), not on a cron. `scope` distinguishes what
+  // kind of thing `scope_key` names — 'tier' (scope_key = 'Tier 1'..
+  // 'Tier 4'/'Unassigned'), 'portfolio' (scope_key always 'portfolio'), or
+  // 'arr_band' (scope_key = a band label like "$10k-25k") — so one table
+  // covers every breakdown this app needs instead of one table per chart.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS kpi_metric_history (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope          TEXT NOT NULL,
+      scope_key      TEXT NOT NULL,
+      metric_key     TEXT NOT NULL,
+      recorded_date  TEXT NOT NULL,
+      value          REAL NOT NULL,
+      created_at     TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  db.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_kpi_metric_history_daily
+    ON kpi_metric_history(scope, scope_key, metric_key, recorded_date);
+  `);
+
   return db;
 }
 
@@ -80,4 +106,28 @@ function deleteDecision(id) {
   run('DELETE FROM decisions WHERE id = ?', [id]);
 }
 
-module.exports = { initDb, listDecisions, addDecision, deleteDecision };
+/**
+ * Records today's value for each {scope, scopeKey, metricKey} row, one
+ * point per calendar day — same delete-then-insert "upsert" as alis-hub's
+ * recordKpiMetricSnapshots, backed by the table's UNIQUE index. Refreshing
+ * the dashboard multiple times in one day overwrites that day's point
+ * rather than accumulating duplicates.
+ */
+function recordKpiMetricSnapshots(rows) {
+  const today = new Date().toISOString().slice(0, 10);
+  for (const r of rows) {
+    db.run('DELETE FROM kpi_metric_history WHERE scope = ? AND scope_key = ? AND metric_key = ? AND recorded_date = ?', [r.scope, r.scopeKey, r.metricKey, today]);
+    db.run('INSERT INTO kpi_metric_history (scope, scope_key, metric_key, recorded_date, value) VALUES (?, ?, ?, ?, ?)', [r.scope, r.scopeKey, r.metricKey, today, r.value]);
+  }
+  saveToDisk();
+}
+
+/** Every recorded point for a given scope (e.g. every tier's every metric, across every captured day) — the caller groups/filters client-side rather than this needing a param per axis. */
+function getKpiMetricHistory(scope, limit = 3660) {
+  return queryAll(
+    'SELECT scope_key, metric_key, recorded_date, value FROM kpi_metric_history WHERE scope = ? ORDER BY recorded_date ASC LIMIT ?',
+    [scope, limit]
+  );
+}
+
+module.exports = { initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory };

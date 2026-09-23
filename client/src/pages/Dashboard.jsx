@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getExportData, getKeyContacts } from '../api.js';
+import { getExportData, getKeyContacts, getKpiHistory } from '../api.js';
 import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
+import { KpiTierSection, ArrBandSection, count as formatCount } from '../components/KpiCharts.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -14,7 +15,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
   { category: 'Highlighted', items: ['Escalations', 'Top 3 Enhancements', 'Enhancement Tickets'] },
-  { category: 'Everything', items: ['Accounts'] },
+  { category: 'Everything', items: ['Accounts', 'Portfolio KPIs'] },
 ];
 
 
@@ -363,6 +364,7 @@ export default function Dashboard() {
   const [contactsByAccount, setContactsByAccount] = useState({});
   const [contactsLoadingId, setContactsLoadingId] = useState(null);
   const [contactsErrorByAccount, setContactsErrorByAccount] = useState({});
+  const [kpiHistory, setKpiHistory] = useState({ tier: [], portfolio: [], arrBand: [] });
 
   function handleAccountSort(key) {
     setAccountSort((prev) => {
@@ -388,7 +390,13 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     getExportData()
-      .then(setData)
+      .then((d) => {
+        setData(d);
+        // /api/export just (re-)wrote today's KPI snapshot row — refetch
+        // history so a Refresh mid-session reflects it immediately instead
+        // of only after a full page reload.
+        getKpiHistory().then(setKpiHistory).catch(() => {});
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }
@@ -550,6 +558,41 @@ export default function Dashboard() {
             {filteredAccounts.length > 50 && (
               <p className="text-xs text-neutral-400 mt-2">Showing 50 of {filteredAccounts.length} — narrow your search.</p>
             )}
+          </SectionCard>
+
+          <SectionCard
+            title="Portfolio KPIs"
+            description="ARR, accounts, and communities broken down by Client Tier, portfolio-wide — each with a trend built from one snapshot captured per day."
+            defaultExpanded={false}
+          >
+            <KpiTierSection
+              title="ARR by Tier" metricKey="arrCents" name="ARR"
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={usd}
+            />
+            <KpiTierSection
+              title="Companies by Tier" metricKey="companyCount" name="Companies"
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
+            />
+            <KpiTierSection
+              title="Communities by Tier" metricKey="communityCount" name="Communities"
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
+            />
+            <ArrBandSection current={data.kpi} arrBandHistory={kpiHistory.arrBand} />
+            <KpiTierSection
+              title={`ARR Added (${new Date().getFullYear()}) by Tier`} metricKey="arrAddedThisYearCents" name="ARR Added"
+              description="Sum of ARR value across deals closed-won this calendar year, by tier."
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={usd}
+            />
+            <KpiTierSection
+              title={`Companies Added (${new Date().getFullYear()}) by Tier`} metricKey="companiesAddedThisYear" name="Companies Added"
+              description="Accounts whose HubSpot Home Office record was created this calendar year, by tier."
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
+            />
+            <KpiTierSection
+              title={`Communities Added (${new Date().getFullYear()}) by Tier`} metricKey="communitiesAddedThisYear" name="Communities Added"
+              description="Approximation: current community count of accounts created this calendar year — a community added mid-year to an older account isn't counted, since communities don't carry their own add date."
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
+            />
           </SectionCard>
 
           <SectionCard
