@@ -14,6 +14,7 @@
  * hubspotAccounts.js's company pull already does).
  */
 const { hubspotRequest, getPipelineStageLabels, getPropertyOptionLabels, batchGetCompanyIdsFor, hubspotRecordUrl, chunk } = require('./hubspotClient');
+const { inferModule } = require('./moduleInference');
 
 const CATEGORY_2_0_LABELS = {
   false: 'General Question',
@@ -72,6 +73,24 @@ function htmlToText(html) {
     .replace(/&amp;/g, '&')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** Map<ticketId, plainText description> — fetched separately (not on the portfolio-wide search) since only escalations missing a module need it. */
+async function getTicketDescriptions(ticketIds) {
+  const result = new Map();
+  for (const batch of chunk(ticketIds, 100)) {
+    const { status, body } = await hubspotRequest('POST', '/crm/v3/objects/tickets/batch/read', {
+      properties: ['content'],
+      inputs: batch.map((id) => ({ id })),
+    });
+    if (status !== 200 && status !== 207) {
+      throw new Error(`HubSpot ticket description batch read failed (${status}): ${JSON.stringify(body)}`);
+    }
+    for (const t of body.results || []) {
+      if (t.properties?.content) result.set(t.id, htmlToText(t.properties.content));
+    }
+  }
+  return result;
 }
 
 /** Map<engagementId, plainText> for pinned notes. A pinned engagement can also be an email/call/task — those ids just don't resolve as notes and are skipped. */
@@ -165,6 +184,7 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
         subject: p.subject || '(no subject)',
         category,
         module: p.alis_module || null,
+        moduleInferred: null,
         enhancementFocus: rawFocus ? (focusLabels.get(rawFocus) || rawFocus) : null,
         pinnedEngagementId: p.hs_pinned_engagement_id || null,
         pinnedNote: null,
@@ -205,6 +225,17 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
     } catch (err) {
       console.warn('Pinned-note lookup failed; continuing without notes:', err.message);
     }
+  }
+
+  const needModule = rows.filter((r) => r.isEscalation && !r.module);
+  let descriptions = new Map();
+  try {
+    descriptions = await getTicketDescriptions(needModule.map((r) => r.ticketId));
+  } catch (err) {
+    console.warn('Ticket description lookup failed; inferring module from subject/next step only:', err.message);
+  }
+  for (const r of needModule) {
+    r.moduleInferred = inferModule({ subject: r.subject, description: descriptions.get(r.ticketId), nextStep: r.nextStep });
   }
   return rows;
 }

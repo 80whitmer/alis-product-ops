@@ -299,7 +299,7 @@ function RequestRow({ r, expanded, onToggle }) {
                 <div><span className="text-neutral-400">Ticket ID:</span> {r.ticketId}</div>
                 <div><span className="text-neutral-400">Created:</span> {r.createdAt ? r.createdAt.slice(0, 10) : '—'}</div>
                 <div><span className="text-neutral-400">Last modified:</span> {r.lastModifiedAt ? r.lastModifiedAt.slice(0, 10) : '—'}</div>
-                <div><span className="text-neutral-400">ALIS Module:</span> {r.module || <span className="text-accent-600">Not set</span>}</div>
+                <div><span className="text-neutral-400">ALIS Module:</span> {r.module || <span className="text-accent-600">Not set{r.moduleInferred ? ` (suggested: ${r.moduleInferred})` : ''}</span>}</div>
                 {r.isEnhancementRequest && <div><span className="text-neutral-400">Focus:</span> {r.enhancementFocus || 'Not set'}</div>}
                 {r.url && <div><a href={r.url} target="_blank" rel="noreferrer">Open in HubSpot &rarr;</a></div>}
               </div>

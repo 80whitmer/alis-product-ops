@@ -29,7 +29,7 @@ function PillToggle({ options, value, onChange }) {
     <div className="flex gap-1.5">
       {options.map((o) => (
         <button
-          key={o.value}
+          key={String(o.value)}
           type="button"
           onClick={() => onChange(o.value)}
           className={`text-xs px-3 py-1 rounded-full border transition-colors ${
@@ -184,27 +184,32 @@ const NO_MODULE = 'No module';
 export function ModuleSection({ openItems, closedItems }) {
   const [status, setStatus] = useState('open');
   const [includeNoModule, setIncludeNoModule] = useState(false);
+  const [useInferred, setUseInferred] = useState(true);
   const items = status === 'open' ? openItems : closedItems;
+  const moduleOf = (t) => t.module || (useInferred && t.moduleInferred) || NO_MODULE;
 
   const chartData = useMemo(() => {
-    const scoped = includeNoModule ? items : items.filter((t) => t.module);
-    return groupByTier(scoped, (t) => t.module || NO_MODULE);
-  }, [items, includeNoModule]);
+    const scoped = includeNoModule ? items : items.filter((t) => moduleOf(t) !== NO_MODULE);
+    return groupByTier(scoped, moduleOf);
+  }, [items, includeNoModule, useInferred]);
 
   const summary = useMemo(() => {
     const rows = new Map();
     const bump = (t, key) => {
-      const name = t.module || NO_MODULE;
-      if (!rows.has(name)) rows.set(name, { name, open: 0, closed: 0 });
-      rows.get(name)[key] += 1;
+      const name = moduleOf(t);
+      if (!rows.has(name)) rows.set(name, { name, open: 0, closed: 0, inferred: 0 });
+      const row = rows.get(name);
+      row[key] += 1;
+      if (!t.module && name !== NO_MODULE) row.inferred += 1;
     };
     openItems.forEach((t) => bump(t, 'open'));
     closedItems.forEach((t) => bump(t, 'closed'));
     return [...rows.values()]
       .sort((a, b) => (a.name === NO_MODULE) - (b.name === NO_MODULE) || b.open - a.open || b.closed - a.closed);
-  }, [openItems, closedItems]);
+  }, [openItems, closedItems, useInferred]);
 
   const openMissing = openItems.filter((t) => !t.module).length;
+  const openSuggested = openItems.filter((t) => !t.module && t.moduleInferred).length;
   const closedMissing = closedItems.filter((t) => !t.module).length;
   const chartedTotal = chartData.reduce((s, d) => s + d.total, 0);
 
@@ -219,7 +224,7 @@ export function ModuleSection({ openItems, closedItems }) {
         <div className="card border-l-4 border-l-accent-500">
           <p className="text-xs text-neutral-500 uppercase tracking-wide">Open — Missing a Module</p>
           <p className="text-2xl font-bold text-accent-600 mt-1">{openMissing}</p>
-          <p className="text-xs text-neutral-400 mt-0.5">{pct(openMissing, openItems.length)}% of open escalations</p>
+          <p className="text-xs text-neutral-400 mt-0.5">{pct(openMissing, openItems.length)}% of open · {openSuggested} have a suggested module</p>
         </div>
         <div className="card">
           <p className="text-xs text-neutral-500 uppercase tracking-wide">Closed — Missing a Module</p>
@@ -229,7 +234,10 @@ export function ModuleSection({ openItems, closedItems }) {
       </div>
 
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <PillToggle options={[{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <PillToggle options={[{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }]} value={status} onChange={setStatus} />
+          <PillToggle options={[{ value: true, label: 'Set + inferred' }, { value: false, label: 'Set only' }]} value={useInferred} onChange={setUseInferred} />
+        </div>
         <label className="flex items-center gap-2 text-xs text-neutral-500">
           <input type="checkbox" checked={includeNoModule} onChange={(e) => setIncludeNoModule(e.target.checked)} />
           Include "{NO_MODULE}" bar
@@ -238,6 +246,12 @@ export function ModuleSection({ openItems, closedItems }) {
       <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">
         {status === 'open' ? 'Open' : 'Closed'} Escalations by ALIS Module
       </h4>
+      {useInferred && (
+        <p className="text-xs text-neutral-400 mb-2">
+          Where ALIS Module is blank, a module is inferred from keywords in the ticket's subject, description, and next step — a
+          suggestion only, never written back to HubSpot. Switch to "Set only" to see just what's recorded.
+        </p>
+      )}
       {chartData.length === 0
         ? <p className="text-sm text-neutral-500 italic mb-6">No {status} escalations have a module set.</p>
         : <div className="mb-6"><TierStackedBarChart data={chartData} grandTotal={chartedTotal} /></div>}
@@ -245,7 +259,7 @@ export function ModuleSection({ openItems, closedItems }) {
       <div className="overflow-x-auto mb-6">
         <table>
           <thead>
-            <tr><th>ALIS Module</th><th>Open</th><th>Closed</th><th>Total</th></tr>
+            <tr><th>ALIS Module</th><th>Open</th><th>Closed</th><th>Total</th>{useInferred && <th title="Of the total, how many were inferred rather than set in HubSpot">Inferred</th>}</tr>
           </thead>
           <tbody>
             {summary.map((r) => (
@@ -254,6 +268,7 @@ export function ModuleSection({ openItems, closedItems }) {
                 <td>{r.open}</td>
                 <td>{r.closed}</td>
                 <td>{r.open + r.closed}</td>
+                {useInferred && <td className="text-neutral-400">{r.inferred || '—'}</td>}
               </tr>
             ))}
           </tbody>
