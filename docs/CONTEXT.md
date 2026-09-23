@@ -27,11 +27,11 @@ shows the identical pattern playing out here in the org's own words, not a guess
   vs. what the board shows: pod capacity is currently self-reported and unreliable.
 - **Steven Chen (Eng/AI)** — needs ticket status tied to something more legible than
   Jira hygiene.
-- **Ella Behrens (Integrations)** — does integration feasibility scoping and keeps
-  hitting a data-provenance wall (the DS Smart vitals thread: *"right now there is no
-  way for us to tell if it came from them or not"*). Needs contract/entitlement/usage
-  truth per account, fast. No individual dashboard, no owner-scoping — she needs
-  company-wide, realtime client information.
+- **Integrations team** — does integration feasibility scoping and keeps hitting a
+  data-provenance wall (the DS Smart vitals thread: *"right now there is no way for us
+  to tell if it came from them or not"*). Needs contract/entitlement/usage truth per
+  account, fast. No individual dashboard, no owner-scoping — they need company-wide,
+  realtime client information.
 - **Hozi (Huzaifa Tapal)** — infra/ops-adjacent leadership; wants system/account-health
   rollups, not ticket-level noise.
 - **BI Pod (Kelly, Tony, Bebb, Cameron)** — running a 32-item, some-year-old backlog off
@@ -47,8 +47,9 @@ behind open requests — not TC's prioritization view. Same backend, separate su
 
 ## 2026-09-21 pivot: v1 is a data export, not a tool
 
-Ella's original ask, before any of the six-view plan below existed, was simpler than
-all of it: a spreadsheet she could refresh with realtime ALIS-client data. Rather than
+The integrations team's original ask, before any of the six-view plan below existed,
+was simpler than all of it: a spreadsheet they could refresh with realtime ALIS-client
+data. Rather than
 build the all-encompassing platform first, v1 leads with exactly that — **Data Export**
 (`/export` in the nav): one button, pulls live from HubSpot, downloads one Excel file
 with two unscored sheets (Accounts; Active Requests joined to account ARR/tier). No

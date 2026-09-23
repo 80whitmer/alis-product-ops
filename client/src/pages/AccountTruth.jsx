@@ -40,7 +40,7 @@ export default function AccountTruth() {
     <>
       <div className="page-head">
         <h2>Account Truth</h2>
-        <p>Contracted (HubSpot deals + line items) for any account — Ella's "is this a real cross-client need or a one-off" lookup, in one place instead of a Slack thread.</p>
+        <p>Contracted (HubSpot deals + line items) for any account — answers "is this a real cross-client need or a one-off" in one place instead of a Slack thread.</p>
       </div>
 
       <div className="notice">

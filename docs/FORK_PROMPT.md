@@ -37,9 +37,9 @@ evidence in its place.
   hygiene, so effort sizing reflects real business impact, not just who asked loudest.
 - **Tyler Lannom (Clinical pod / enhancement triage)** — needs an accurate, non-self-reported picture of
   pod workload and backlog age so "does this jump the line" isn't a Slack argument every time.
-- **Ella Behrens (Integrations)** — needs fast, reliable answers to "which accounts/communities are on this
-  integration, what's their contract/entitlement status, and is this a one-off or a pattern" before she
-  scopes anything.
+- **Integrations team** — needs fast, reliable answers to "which accounts/communities are on this
+  integration, what's their contract/entitlement status, and is this a one-off or a pattern" before they
+  scope anything.
 - **Hozi (Huzaifa Tapal)** — ops/infra-adjacent leadership; wants system/account-health rollups, not
   ticket-level noise.
 
@@ -63,8 +63,8 @@ get his answer, and TC's team should never have to look at billing reconciliatio
    actual number.
 2. **Account/community usage + contract truth, on demand.** Given an account or integration, show
    contracted (HubSpot line items) vs. enabled (ALIS entitlements) vs. actually used — ALIS Hub already
-   builds this RAG grid for the Company/Community Usage Audit, so extend it to answer Ella's "is this a
-   real cross-client need or a one-off" question in one lookup instead of a Slack thread.
+   builds this RAG grid for the Company/Community Usage Audit, so extend it to answer the integrations
+   team's "is this a real cross-client need or a one-off" question in one lookup instead of a Slack thread.
 3. **Pod capacity, from real signal, not self-report.** Pull actual dev-board/Jira status per pod
    (Clinical, CRM, etc.) rather than relying on people remembering to update tickets — this is the specific
    gap Tyler and William Metcalf were fighting over ("the board represents the same thing in some way").

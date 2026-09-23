@@ -13,8 +13,8 @@ evidence for who this is for and what each view needs to do, and
 
 Pivoted mid-build: instead of the six-view decision platform, v1 leads with the
 simplest thing that's actually valuable today — a live dashboard (with an Excel
-export alongside it), unscored, so Trisha's/BI's team and Ella can browse it in the
-browser or plug the export into whatever they already use. The six-view plan isn't
+export alongside it), unscored, so Trisha's/BI's team and the integrations team can
+browse it in the browser or plug the export into whatever they already use. The six-view plan isn't
 gone, just shelved (see `docs/CONTEXT.md`) — the code and routes are still in the
 repo, just not the lead nav experience.
 
@@ -88,4 +88,4 @@ alis-product-ops/
 - Internal decision-support tool. No "send"/"publish" button — anything
   client-facing or leaving the building goes through a human first.
 - No individual dashboards, no HubSpot-Owner-ID concept — this is portfolio-wide by
-  design (Ella and everyone else sees the whole book, not a personal slice).
+  design (everyone sees the whole book, not a personal slice).

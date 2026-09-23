@@ -2,7 +2,7 @@
  * Portfolio-wide company listing — the account picker for Contract Truth.
  * Deliberately NOT owner-scoped (unlike alis-hub's getOwnedCompanies):
  * this app has no individual dashboards and no HubSpot Owner ID concept —
- * Ella and everyone else who uses this sees the whole book. Ported from
+ * everyone who uses this sees the whole book. Ported from
  * alis-hub's server/services/hubspotAccounts.js.
  */
 const { hubspotRequest } = require('./hubspotClient');
