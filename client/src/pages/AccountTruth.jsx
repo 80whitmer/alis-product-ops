@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements,
+  getContractTruth, setAlisAdminId, importAlisAdminIds, discoverAlisAdminIds, clearAlisAdminId, getLiveEntitlements,
   setCompanyHost, importCompanyHosts, clearCompanyHost,
 } from '../api.js';
 import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/alisAdminIdTemplate.js';
@@ -33,6 +33,11 @@ export default function AccountTruth() {
   const [importingIds, setImportingIds] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [importError, setImportError] = useState(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverResult, setDiscoverResult] = useState(null);
+  const [discoverError, setDiscoverError] = useState(null);
+  const [discoverSelections, setDiscoverSelections] = useState({});
+  const [applyingDiscovered, setApplyingDiscovered] = useState(false);
   const [editingAlisId, setEditingAlisId] = useState(false);
   const [alisIdInput, setAlisIdInput] = useState('');
   const [savingAlisId, setSavingAlisId] = useState(false);
@@ -182,6 +187,66 @@ export default function AccountTruth() {
     }
   }
 
+  async function handleDiscover() {
+    setDiscovering(true);
+    setDiscoverError(null);
+    setDiscoverResult(null);
+    setDiscoverSelections({});
+    try {
+      const slim = accounts.map((a) => ({ id: a.id, name: a.name, alisAdminCompanyId: a.alisAdminCompanyId }));
+      const result = await discoverAlisAdminIds(slim);
+      setDiscoverResult(result);
+      // Confident matches pre-selected for import; ambiguous rows default
+      // to "skip" — Aaron picks the right candidate (or none) explicitly.
+      const initial = {};
+      result.autoMatched.forEach((m, i) => { initial[`auto:${i}`] = m; });
+      setDiscoverSelections(initial);
+    } catch (err) {
+      setDiscoverError(err.message);
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  function setAmbiguousSelection(key, candidate) {
+    setDiscoverSelections((prev) => {
+      const next = { ...prev };
+      if (candidate) next[key] = candidate;
+      else delete next[key];
+      return next;
+    });
+  }
+
+  function toggleAutoMatch(key, match, checked) {
+    setDiscoverSelections((prev) => {
+      const next = { ...prev };
+      if (checked) next[key] = match;
+      else delete next[key];
+      return next;
+    });
+  }
+
+  async function handleApplyDiscovered() {
+    const rows = Object.values(discoverSelections).map((m) => ({
+      hubspotCompanyId: m.hubspotCompanyId, companyName: m.companyName, alisAdminCompanyId: m.alisAdminCompanyId,
+    }));
+    if (rows.length === 0) return;
+    setApplyingDiscovered(true);
+    setImportError(null);
+    try {
+      const res = await importAlisAdminIds(rows);
+      for (const r of rows) applyAlisAdminId(r.hubspotCompanyId, r.alisAdminCompanyId);
+      markUpdated('alisAdminIdsUpdatedAt');
+      setImportResult(`Imported ${res.imported} ALIS Admin Company ID${res.imported === 1 ? '' : 's'} from discovery.`);
+      setDiscoverResult(null);
+      setDiscoverSelections({});
+    } catch (err) {
+      setImportError(err.message);
+    } finally {
+      setApplyingDiscovered(false);
+    }
+  }
+
   async function handleSaveHost() {
     const value = hostInput.trim();
     if (!value) return;
@@ -283,6 +348,82 @@ export default function AccountTruth() {
               {importResult && <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{importResult}</span>}
             </div>
             {importError && <div className="notice danger">{importError}</div>}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+              <button className="secondary" onClick={handleDiscover} disabled={discovering}>
+                {discovering ? '🔍 Scraping ALIS admin…' : '🔍 Discover ALIS Admin Company IDs'}
+              </button>
+              <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
+                Scrapes ALIS admin's own company directory and proposes matches by name — review before importing.
+              </span>
+            </div>
+            {discoverError && <div className="notice danger">{discoverError}</div>}
+            {discoverResult && (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 10, background: '#fff' }}>
+                <p style={{ fontSize: 12.5, margin: '0 0 8px' }}>
+                  {discoverResult.directoryCount} companies found in ALIS admin —{' '}
+                  {discoverResult.autoMatched.length} confident match{discoverResult.autoMatched.length === 1 ? '' : 'es'},{' '}
+                  {discoverResult.ambiguous.length} need review,{' '}
+                  {discoverResult.noCandidate.length} no name match found
+                  {discoverResult.noAlisId.length > 0 && <>, {discoverResult.noAlisId.length} row(s) had no id in the link</>}.
+                </p>
+                {discoverResult.autoMatched.length > 0 && (
+                  <>
+                    <p style={{ fontSize: 12, fontWeight: 600, margin: '8px 0 4px' }}>Confident matches (checked = will import)</p>
+                    {discoverResult.autoMatched.map((m, i) => {
+                      const key = `auto:${i}`;
+                      return (
+                        <label key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, padding: '2px 0' }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(discoverSelections[key])}
+                            onChange={(e) => toggleAutoMatch(key, m, e.target.checked)}
+                          />
+                          <span><strong>{m.alisCompanyName}</strong> (id {m.alisAdminCompanyId}) → {m.companyName}</span>
+                          <span style={{ color: 'var(--ink-soft)' }}>match {Math.round(m.score * 100)}%</span>
+                        </label>
+                      );
+                    })}
+                  </>
+                )}
+                {discoverResult.ambiguous.length > 0 && (
+                  <>
+                    <p style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 4px' }}>Needs review — pick the right company, or leave as Skip</p>
+                    {discoverResult.ambiguous.map((row, i) => {
+                      const key = `amb:${i}`;
+                      const chosen = discoverSelections[key];
+                      return (
+                        <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, padding: '2px 0', flexWrap: 'wrap' }}>
+                          <span><strong>{row.alisCompanyName}</strong> (id {row.alisAdminCompanyId})</span>
+                          <span>→</span>
+                          <select
+                            value={chosen ? chosen.hubspotCompanyId : ''}
+                            onChange={(e) => {
+                              const candidate = row.candidates.find((c) => c.hubspotCompanyId === e.target.value);
+                              setAmbiguousSelection(key, candidate
+                                ? { hubspotCompanyId: candidate.hubspotCompanyId, companyName: candidate.companyName, alisAdminCompanyId: row.alisAdminCompanyId }
+                                : null);
+                            }}
+                          >
+                            <option value="">Skip</option>
+                            {row.candidates.map((c) => (
+                              <option key={c.hubspotCompanyId} value={c.hubspotCompanyId}>{c.companyName} ({Math.round(c.score * 100)}%)</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+                <button
+                  onClick={handleApplyDiscovered}
+                  disabled={applyingDiscovered || Object.keys(discoverSelections).length === 0}
+                  style={{ marginTop: 10 }}
+                >
+                  {applyingDiscovered ? 'Importing…' : `Import Selected (${Object.keys(discoverSelections).length})`}
+                </button>
+              </div>
+            )}
 
             <hr style={{ border: 'none', borderTop: '1px solid var(--line)', margin: '4px 0' }} />
 

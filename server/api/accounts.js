@@ -3,6 +3,7 @@ const router = express.Router();
 const { getContractedModulesForCompany } = require('../services/hubspotDeals');
 const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
+const { discoverAlisAdminIds } = require('../services/alisCompanyDiscovery');
 const {
   getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
   setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost,
@@ -111,6 +112,26 @@ router.post('/company-hosts/import', (req, res) => {
   }
   const imported = bulkSetCompanyHosts(rows);
   res.json({ imported });
+});
+
+// POST /api/accounts/alis-admin-ids/discover — scrapes ALIS admin's own
+// company directory and proposes ALIS Admin Company ID matches by name
+// against `companies` (the client's already-loaded portfolio list, sent
+// in the body — same reasoning as live-entitlements' `products` param:
+// avoids this route re-fetching the whole company list itself). A
+// proposal only; nothing is saved until the reviewed result is POSTed to
+// /alis-admin-ids/import below.
+router.post('/alis-admin-ids/discover', async (req, res, next) => {
+  try {
+    const companies = req.body?.companies;
+    if (!Array.isArray(companies)) {
+      return res.status(400).json({ error: 'Expected { companies: [{ id, name, alisAdminCompanyId }] }' });
+    }
+    const result = await discoverAlisAdminIds(companies);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // GET /api/accounts/:id/live-entitlements?products=A,B,C — logs into ALIS
