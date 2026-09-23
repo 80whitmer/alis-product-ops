@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getAllHomeOfficeCompanies } = require('../services/hubspotAccounts');
 const { getTicketHistory, withEnhancementCounts } = require('../services/hubspotRequests');
-const { getDealSummaryByCompany } = require('../services/hubspotDealsSummary');
+const { getDealsWithCompanyContext, getDealSummaryByCompany, getImplementationProjects } = require('../services/hubspotDealsSummary');
 const { computeTierSnapshotRows } = require('../services/kpiMetrics');
 const { recordKpiMetricSnapshots, listAlisAdminIds, listCompanyHosts, getMaxUpdatedAt } = require('../db/database');
 
@@ -30,6 +30,20 @@ function withDealSummary(companies, dealSummaryByCompany) {
   });
 }
 
+/** Joins each implementation project onto its company's context (name/tier/ARR/AM) — same convention as hubspotRequests.js's ticket rows for a deal whose company isn't in the portfolio list. */
+function withProjectCompanyContext(projects, companiesById) {
+  return projects.map((p) => {
+    const company = p.companyId ? companiesById.get(p.companyId) : null;
+    return {
+      ...p,
+      companyName: company?.name || (p.companyId ? '(company not in portfolio list)' : null),
+      tier: company?.tier ?? null,
+      arrCents: company?.arrCents ?? null,
+      accountManagerName: company?.accountManagerName ?? null,
+    };
+  });
+}
+
 // GET /api/export — the V1 "just serve up the data" endpoint. Returns raw,
 // unscored rows for the two sheets Trisha's/BI's team plug into their own
 // existing spreadsheet/DOMO setup: the account roster, and every
@@ -46,12 +60,14 @@ router.get('/', async (req, res, next) => {
     // reached your secondly limit"). Costs some wall-clock time, but
     // reliability over speed for a page that already takes 15-25s.
     const rawCompanies = await getAllHomeOfficeCompanies();
-    const dealSummaryByCompany = await getDealSummaryByCompany();
+    const dealsWithCompany = await getDealsWithCompanyContext();
+    const dealSummaryByCompany = getDealSummaryByCompany(dealsWithCompany);
     let companies = withDealSummary(rawCompanies, dealSummaryByCompany);
     const companiesById = new Map(companies.map((c) => [c.id, c]));
     const requests = await getTicketHistory({ lookbackDays: 400, companiesById });
     companies = withEnhancementCounts(companies, requests);
     companies = withAlisMappings(companies);
+    const implementationProjects = withProjectCompanyContext(getImplementationProjects(dealsWithCompany), companiesById);
 
     // Captures today's ARR/company/community-by-tier snapshot as a side
     // effect of this same load — the "tracking and trending" on the
@@ -67,6 +83,7 @@ router.get('/', async (req, res, next) => {
       generatedAt: new Date().toISOString(),
       companies,
       requests,
+      implementationProjects,
       kpi: kpiSnapshot.current,
       alisAdminIdsUpdatedAt: getMaxUpdatedAt('alis_admin_ids'),
       companyHostsUpdatedAt: getMaxUpdatedAt('company_hosts'),

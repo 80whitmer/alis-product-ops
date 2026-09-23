@@ -135,3 +135,49 @@ export async function exportRequestsToExcel(requests, sectionTitle, generatedAt)
   addRequestsSheet(workbook, requests, sectionTitle.slice(0, 31));
   await download(workbook, `alis-product-hub-${slugify(sectionTitle)}-${generatedAt.slice(0, 10)}.xlsx`);
 }
+
+function addProjectsSheet(workbook, projects, sheetName) {
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.columns = [
+    { header: 'Company', key: 'companyName', width: 30 },
+    { header: 'Account Manager', key: 'accountManagerName', width: 18 },
+    { header: 'Project', key: 'name', width: 40 },
+    { header: 'Tier', key: 'tier', width: 8 },
+    { header: 'ARR ($)', key: 'arr', width: 14 },
+    { header: 'Status', key: 'projectStatus', width: 16 },
+    { header: 'RAG', key: 'projectHealthRag', width: 8 },
+    { header: 'Progress (%)', key: 'projectProgress', width: 12 },
+    { header: 'Owner', key: 'projectOwner', width: 18 },
+    { header: 'Projected Go-Live', key: 'projectedGoLiveDate', width: 14 },
+    { header: 'Created', key: 'createdAt', width: 12 },
+    { header: 'Deal ID', key: 'dealId', width: 14 },
+    { header: 'Link', key: 'url', width: 40 },
+  ];
+  for (const p of projects) {
+    sheet.addRow({
+      companyName: p.companyName,
+      accountManagerName: p.accountManagerName,
+      name: p.name,
+      tier: p.tier,
+      arr: usd(p.arrCents),
+      projectStatus: p.projectStatus,
+      projectHealthRag: p.projectHealthRag,
+      projectProgress: p.projectProgress,
+      projectOwner: p.projectOwner,
+      projectedGoLiveDate: p.projectedGoLiveDate ? p.projectedGoLiveDate.slice(0, 10) : '',
+      createdAt: p.createdAt ? p.createdAt.slice(0, 10) : '',
+      dealId: p.dealId,
+      url: p.url,
+    });
+  }
+  sheet.getRow(1).font = { bold: true };
+  return sheet;
+}
+
+/** Per-section export for the Onboarding section's implementation-tracked deals. */
+export async function exportProjectsToExcel(projects, generatedAt) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  addProjectsSheet(workbook, projects, 'Onboarding');
+  await download(workbook, `alis-product-hub-onboarding-${generatedAt.slice(0, 10)}.xlsx`);
+}

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getKeyContacts } from '../api.js';
 import { useDataCache } from '../DataCache.jsx';
-import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
+import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
 import { KpiTierSection, ArrBandSection, AverageMetricSection, TIER_ORDER, TIER_COLOR, count as formatCount } from '../components/KpiCharts.jsx';
 import TierFilterPills, { filterByTier } from '../components/TierFilterPills.jsx';
+import OnboardingSection from '../components/OnboardingSection.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -17,7 +18,7 @@ const JUMP_EVENT = 'alis-product-hub:jump-to-section';
 
 const OVERVIEW_SECTIONS = [
   { category: 'Highlighted', items: ['Escalations', 'Top 3 Enhancements', 'Enhancement Tickets'] },
-  { category: 'Everything', items: ['Accounts', 'Portfolio KPIs'] },
+  { category: 'Everything', items: ['Accounts', 'Portfolio KPIs', 'Onboarding'] },
 ];
 
 
@@ -668,6 +669,15 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Onboarding"
+            description="Implementation-tracked deals, portfolio-wide — every deal HubSpot has a Project Status on, open or closed."
+            defaultExpanded={false}
+            action={<SectionExportButton onExport={() => exportProjectsToExcel(data.implementationProjects, data.generatedAt)} />}
+          >
+            <OnboardingSection projects={data.implementationProjects} />
           </SectionCard>
 
           <SectionCard
