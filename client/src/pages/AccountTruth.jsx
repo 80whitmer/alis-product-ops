@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getAccounts, getContractTruth } from '../api.js';
+import { getAccounts, getContractTruth, setAlisAdminId, importAlisAdminIds, clearAlisAdminId, getLiveEntitlements } from '../api.js';
+import { exportAlisAdminIdTemplate, parseAlisAdminIdTemplate } from '../utils/alisAdminIdTemplate.js';
 
 function formatCents(cents) {
   if (cents == null) return '—';
@@ -14,6 +15,17 @@ export default function AccountTruth() {
   const [truth, setTruth] = useState(null);
   const [truthLoading, setTruthLoading] = useState(false);
   const [truthError, setTruthError] = useState(null);
+  const [showUtilities, setShowUtilities] = useState(false);
+  const [importingIds, setImportingIds] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importError, setImportError] = useState(null);
+  const [editingAlisId, setEditingAlisId] = useState(false);
+  const [alisIdInput, setAlisIdInput] = useState('');
+  const [savingAlisId, setSavingAlisId] = useState(false);
+  const [alisIdError, setAlisIdError] = useState(null);
+  const [liveEntitlements, setLiveEntitlements] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState(null);
 
   // Same StrictMode double-invoke guard as Dashboard.jsx — this route now
   // runs the same expensive portfolio-wide ticket-history pull
@@ -43,6 +55,9 @@ export default function AccountTruth() {
     setSelected(null);
     setTruth(null);
     setTruthError(null);
+    setEditingAlisId(false);
+    setLiveEntitlements(null);
+    setLiveError(null);
   }
 
   function selectAccount(account) {
@@ -50,10 +65,90 @@ export default function AccountTruth() {
     setTruth(null);
     setTruthError(null);
     setTruthLoading(true);
+    setEditingAlisId(false);
+    setAlisIdInput(account.alisAdminCompanyId || '');
+    setAlisIdError(null);
+    setLiveEntitlements(null);
+    setLiveError(null);
     getContractTruth(account.id)
       .then(setTruth)
       .catch((err) => setTruthError(err.message))
       .finally(() => setTruthLoading(false));
+  }
+
+  /** Merges a fresh alisAdminCompanyId onto one account, in both the list and (if it's the current one) the selected detail — avoids a full refetch after a save. */
+  function applyAlisAdminId(hubspotCompanyId, alisAdminCompanyId) {
+    setAccounts((prev) => prev.map((a) => (a.id === hubspotCompanyId ? { ...a, alisAdminCompanyId } : a)));
+    setSelected((prev) => (prev && prev.id === hubspotCompanyId ? { ...prev, alisAdminCompanyId } : prev));
+  }
+
+  async function handleSaveAlisId() {
+    const value = alisIdInput.trim();
+    if (!value) return;
+    setSavingAlisId(true);
+    setAlisIdError(null);
+    try {
+      await setAlisAdminId(selected.id, value, selected.name);
+      applyAlisAdminId(selected.id, value);
+      setEditingAlisId(false);
+    } catch (err) {
+      setAlisIdError(err.message);
+    } finally {
+      setSavingAlisId(false);
+    }
+  }
+
+  async function handleCheckLiveEntitlements() {
+    setLiveLoading(true);
+    setLiveError(null);
+    setLiveEntitlements(null);
+    try {
+      const result = await getLiveEntitlements(selected.id);
+      setLiveEntitlements(result);
+    } catch (err) {
+      setLiveError(err.message);
+    } finally {
+      setLiveLoading(false);
+    }
+  }
+
+  async function handleClearAlisId() {
+    setSavingAlisId(true);
+    setAlisIdError(null);
+    try {
+      await clearAlisAdminId(selected.id);
+      applyAlisAdminId(selected.id, null);
+      setAlisIdInput('');
+      setLiveEntitlements(null);
+    } catch (err) {
+      setAlisIdError(err.message);
+    } finally {
+      setSavingAlisId(false);
+    }
+  }
+
+  async function handleDownloadTemplate() {
+    await exportAlisAdminIdTemplate(accounts);
+  }
+
+  async function handleUploadTemplate(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingIds(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const rows = await parseAlisAdminIdTemplate(file);
+      if (rows.length === 0) throw new Error('No rows with an ALIS Admin Company ID filled in were found in this file.');
+      const res = await importAlisAdminIds(rows);
+      for (const r of rows) if (r.hubspotCompanyId) applyAlisAdminId(r.hubspotCompanyId, r.alisAdminCompanyId);
+      setImportResult(`Imported ${res.imported} ALIS Admin Company ID${res.imported === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setImportError(err.message);
+    } finally {
+      setImportingIds(false);
+    }
   }
 
   return (
@@ -64,13 +159,39 @@ export default function AccountTruth() {
       </div>
 
       <div className="notice">
-        Enabled is now live, sourced from HubSpot's own <code>alis_products</code> field
-        (AM-maintained — what was sold/configured, not a live ALIS check). Used (real ALIS
-        export API activity) still isn't built — that needs live ALIS admin credentials,
-        which this app deliberately doesn't take. See docs/CONTEXT.md view #2.
+        Enabled shows two sources side by side: HubSpot's own <code>alis_products</code> field
+        (AM-maintained — what was sold/configured), and a live check against ALIS admin's real
+        entitlement checkboxes (select an account below). The live check needs that account's
+        ALIS Admin Company ID on file first — see Utilities. Used (real ALIS export API usage
+        activity) still isn't built. See docs/CONTEXT.md view #2.
       </div>
 
       <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button className="secondary" onClick={() => setShowUtilities((v) => !v)}>
+            {showUtilities ? 'Hide Utilities' : 'Utilities'}
+          </button>
+        </div>
+
+        {showUtilities && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg-soft, #f7f5f0)', border: '1px solid var(--line)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: 0 }}>
+              ALIS Admin Company IDs — the numeric id from the URL of an account's
+              admin.alisonline.com Entitlements page. Fill these in gradually; no automated
+              way exists to resolve them from HubSpot alone.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="secondary" onClick={handleDownloadTemplate}>📋 Download Template</button>
+              <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
+                {importingIds ? 'Importing…' : '📤 Upload Completed Template'}
+                <input type="file" accept=".xlsx" onChange={handleUploadTemplate} disabled={importingIds} style={{ display: 'none' }} />
+              </label>
+              {importResult && <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{importResult}</span>}
+            </div>
+            {importError && <div className="notice danger">{importError}</div>}
+          </div>
+        )}
+
         <input
           placeholder="Search accounts…"
           value={search}
@@ -130,6 +251,65 @@ export default function AccountTruth() {
               </div>
             ) : (
               <p style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No products recorded in HubSpot for this account.</p>
+            )}
+          </div>
+
+          <div className="notice" style={{ marginBottom: 16 }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Live ALIS Admin Check</p>
+            {!editingAlisId && selected.alisAdminCompanyId ? (
+              <p style={{ fontSize: 12.5, margin: '0 0 8px' }}>
+                ALIS Admin Company ID: <strong>{selected.alisAdminCompanyId}</strong>{' '}
+                <button className="secondary" style={{ fontSize: 12 }} onClick={() => setEditingAlisId(true)}>Edit</button>{' '}
+                <button className="secondary" style={{ fontSize: 12 }} onClick={handleClearAlisId} disabled={savingAlisId}>Clear</button>
+              </p>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                <input
+                  placeholder="ALIS Admin Company ID"
+                  value={alisIdInput}
+                  onChange={(e) => setAlisIdInput(e.target.value)}
+                  style={{ maxWidth: 220 }}
+                />
+                <button onClick={handleSaveAlisId} disabled={savingAlisId || !alisIdInput.trim()}>
+                  {savingAlisId ? 'Saving…' : 'Save'}
+                </button>
+                {selected.alisAdminCompanyId && (
+                  <button className="secondary" onClick={() => { setEditingAlisId(false); setAlisIdInput(selected.alisAdminCompanyId); }}>Cancel</button>
+                )}
+              </div>
+            )}
+            {alisIdError && <div className="notice danger">{alisIdError}</div>}
+
+            {selected.alisAdminCompanyId && !editingAlisId && (
+              <>
+                <button onClick={handleCheckLiveEntitlements} disabled={liveLoading}>
+                  {liveLoading ? 'Checking ALIS admin…' : 'Check Live ALIS Entitlements'}
+                </button>
+                {liveError && <div className="notice danger" style={{ marginTop: 8 }}>{liveError}</div>}
+                {liveEntitlements && (
+                  <div style={{ marginTop: 10 }}>
+                    <p style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '0 0 6px' }}>
+                      {liveEntitlements.enabledLabels.length} of {liveEntitlements.totalFlagCount} entitlements on, as of{' '}
+                      {new Date(liveEntitlements.capturedAt).toLocaleString()} —{' '}
+                      <a href={liveEntitlements.sourceUrl} target="_blank" rel="noreferrer">view in ALIS admin</a>
+                    </p>
+                    {liveEntitlements.enabledLabels.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {liveEntitlements.enabledLabels.map((label) => (
+                          <span
+                            key={label}
+                            style={{ fontSize: 12.5, padding: '3px 10px', borderRadius: 999, background: '#e8f5ec', border: '1px solid #b7dfc3' }}
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No entitlements are checked in ALIS admin for this account.</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

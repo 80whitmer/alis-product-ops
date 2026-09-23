@@ -68,6 +68,20 @@ async function initDb() {
     ON kpi_metric_history(scope, scope_key, metric_key, recorded_date);
   `);
 
+  // The one piece of data needed to run a live ALIS admin entitlements
+  // check (server/services/alisEntitlements.js) that this app has no
+  // automated way to resolve — see that file's doc comment. Entered once
+  // per account (singly, via Account Truth's inline editor, or in bulk via
+  // its Download/Upload template) and reused on every future check.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS alis_admin_ids (
+      hubspot_company_id   TEXT PRIMARY KEY,
+      company_name         TEXT,
+      alis_admin_company_id TEXT NOT NULL,
+      updated_at           TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   return db;
 }
 
@@ -130,4 +144,37 @@ function getKpiMetricHistory(scope, limit = 3660) {
   );
 }
 
-module.exports = { initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory };
+function listAlisAdminIds() {
+  return queryAll('SELECT hubspot_company_id, alis_admin_company_id FROM alis_admin_ids');
+}
+
+function getAlisAdminId(hubspotCompanyId) {
+  const rows = queryAll('SELECT alis_admin_company_id FROM alis_admin_ids WHERE hubspot_company_id = ?', [hubspotCompanyId]);
+  return rows[0]?.alis_admin_company_id ?? null;
+}
+
+function setAlisAdminId({ hubspotCompanyId, companyName, alisAdminCompanyId }) {
+  run(
+    `INSERT INTO alis_admin_ids (hubspot_company_id, company_name, alis_admin_company_id, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(hubspot_company_id) DO UPDATE SET company_name = excluded.company_name, alis_admin_company_id = excluded.alis_admin_company_id, updated_at = excluded.updated_at`,
+    [hubspotCompanyId, companyName || null, alisAdminCompanyId]
+  );
+}
+
+/** Bulk upsert for the Download/Upload template flow — one row per {hubspotCompanyId, companyName, alisAdminCompanyId}, skipping any row with no ID. */
+function bulkSetAlisAdminIds(rows) {
+  for (const r of rows) {
+    if (!r.alisAdminCompanyId) continue;
+    setAlisAdminId(r);
+  }
+}
+
+function deleteAlisAdminId(hubspotCompanyId) {
+  run('DELETE FROM alis_admin_ids WHERE hubspot_company_id = ?', [hubspotCompanyId]);
+}
+
+module.exports = {
+  initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory,
+  listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
+};
