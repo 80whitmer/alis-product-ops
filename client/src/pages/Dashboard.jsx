@@ -232,7 +232,7 @@ function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
               {loading && <p className="text-neutral-500">Loading contacts…</p>}
               {error && <p className="text-red-600">{error}</p>}
               {!loading && !error && contacts && contacts.length === 0 && (
-                <p className="text-neutral-500">No contacts associated with this company in HubSpot.</p>
+                <p className="text-neutral-500">No contacts tagged with a key role (Account Owner, Decision Maker, Billing/Clinical/Sales Admin, etc.) for this company in HubSpot.</p>
               )}
               {!loading && contacts && contacts.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -241,7 +241,14 @@ function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
                       <div className="font-medium text-primary-900">
                         {c.url ? <a href={c.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{c.name}</a> : c.name}
                       </div>
-                      {c.title && <div className="text-xs text-neutral-500">{c.title}</div>}
+                      {c.roles?.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {c.roles.map((role) => (
+                            <span key={role} className="text-[11px] px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 border border-accent-200">{role}</span>
+                          ))}
+                        </div>
+                      )}
+                      {c.title && <div className="text-xs text-neutral-500 mt-1">{c.title}</div>}
                       {c.email && <div className="text-xs text-neutral-600 mt-1">{c.email}</div>}
                       {c.phone && <div className="text-xs text-neutral-600">{c.phone}</div>}
                     </div>

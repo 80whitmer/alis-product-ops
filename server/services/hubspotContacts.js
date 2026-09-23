@@ -1,29 +1,48 @@
 /**
- * Key contacts per company — HubSpot's own company->contact associations,
- * no ALIS pull. "Key" is a title-match heuristic, not a HubSpot flag: this
- * portal has no dedicated primary-contact field to key off of instead.
+ * Key contacts per company — filtered to HubSpot's own Company<->Contact
+ * ASSOCIATION LABELS (not a contact property, and not a title-guessing
+ * heuristic): a real, portal-specific role taxonomy someone already
+ * maintains by hand (Aaron, Sep 2026: "restrict the contact coming through
+ * to the ones with the special HubSpot tags"). Confirmed live via GET
+ * /crm/v4/associations/companies/contacts/labels, and confirmed the
+ * signal-to-noise gain is real: Sinceri Senior Living has 346 total
+ * associated contacts but only 5 carry one of these labels.
  */
 const { hubspotRequest, chunk, hubspotRecordUrl } = require('./hubspotClient');
 
 const CONTACT_PROPERTIES = ['firstname', 'lastname', 'email', 'jobtitle', 'phone'];
 
-// Seniority buckets so the handful of contacts most likely to be
-// decision-makers sort first. Lower = higher rank. Checked in this order
-// specifically so "Vice President of Sales" lands in the VP bucket rather
-// than the top (owner/CEO/president) one — "president" is a substring of
-// "vice president", so the VP check has to run first.
-function rankTitle(title) {
-  if (!title) return 3;
-  const t = title.toLowerCase();
-  if (/\bvice president\b|\bvp\b/.test(t)) return 1;
-  if (/\bowner\b|\bceo\b|\bpresident\b|\bprincipal\b/.test(t)) return 0;
-  if (/\bcfo\b|\bcoo\b|\bdirector\b/.test(t)) return 1;
-  if (/\badministrator\b|\bexecutive director\b/.test(t)) return 2;
-  return 3;
+// Company->Contact association typeIds worth surfacing, confirmed live
+// (Sep 2026) via the labels endpoint above — every other label that
+// endpoint returns (e.g. "Contact with Primary Company", "Clinical",
+// "Sales & Marketing") is deliberately excluded, not just unmapped, per
+// Aaron's explicit list. Order here is also the display sort priority.
+const ROLE_ORDER = [64, 78, 74, 930, 68, 72, 66, 76, 70, 23];
+const ROLE_LABELS_BY_TYPE_ID = {
+  64: 'Account Owner',
+  78: 'Decision Maker',
+  74: 'Billing Admin',
+  930: 'Billing Contact',
+  68: 'Billing Super User',
+  72: 'Clinical Admin',
+  66: 'Clinical Super User',
+  76: 'Sales Admin',
+  70: 'Sales Super User',
+  23: 'ALIS Pay Contact',
+};
+
+function bestRoleRank(roleTypeIds) {
+  let best = ROLE_ORDER.length;
+  for (const id of roleTypeIds) {
+    const idx = ROLE_ORDER.indexOf(id);
+    if (idx !== -1 && idx < best) best = idx;
+  }
+  return best;
 }
 
-async function getContactIdsForCompany(companyId) {
-  const ids = [];
+/** Every contact association for a company that carries at least one of the target role labels — paginated, and filtered here rather than after batch-reading, so a company with hundreds of contacts doesn't need a batch/read call for every single one of them just to throw most away. */
+async function getRoledContactsForCompany(companyId) {
+  const roled = [];
   let after;
   do {
     const path = `/crm/v4/objects/companies/${companyId}/associations/contacts${after ? `?after=${encodeURIComponent(after)}` : ''}`;
@@ -31,10 +50,13 @@ async function getContactIdsForCompany(companyId) {
     if (status !== 200) {
       throw new Error(`HubSpot contact associations lookup failed (${status}): ${JSON.stringify(body)}`);
     }
-    ids.push(...(body.results || []).map((r) => r.toObjectId));
+    for (const r of body.results || []) {
+      const roleTypeIds = (r.associationTypes || []).map((t) => t.typeId).filter((id) => ROLE_LABELS_BY_TYPE_ID[id] != null);
+      if (roleTypeIds.length > 0) roled.push({ contactId: r.toObjectId, roleTypeIds });
+    }
     after = body.paging?.next?.after;
   } while (after);
-  return ids;
+  return roled;
 }
 
 async function batchReadContacts(contactIds) {
@@ -53,20 +75,33 @@ async function batchReadContacts(contactIds) {
   return results;
 }
 
-/** Every contact associated with a company, ranked so likely decision-makers surface first, then alphabetically. Capping the list for display is the caller's call, not this function's. */
+/** Every contact carrying one of the target role labels for this company, each with its role(s) attached, ranked by the most senior/relevant role held (Account Owner and Decision Maker first) then alphabetically. Empty is a real, common answer — most contacts on file for an account carry no special role. */
 async function getKeyContactsForCompany(companyId) {
-  const contactIds = await getContactIdsForCompany(companyId);
-  const contacts = await batchReadContacts(contactIds);
+  const roled = await getRoledContactsForCompany(companyId);
+  if (roled.length === 0) return [];
+
+  const rolesByContactId = new Map(roled.map((r) => [String(r.contactId), r.roleTypeIds]));
+  const contacts = await batchReadContacts(roled.map((r) => r.contactId));
+
   return contacts
-    .map((c) => ({
-      id: c.id,
-      name: [c.properties.firstname, c.properties.lastname].filter(Boolean).join(' ') || '(no name)',
-      title: c.properties.jobtitle || null,
-      email: c.properties.email || null,
-      phone: c.properties.phone || null,
-      url: hubspotRecordUrl('contact', c.id),
-    }))
-    .sort((a, b) => rankTitle(a.title) - rankTitle(b.title) || a.name.localeCompare(b.name));
+    .map((c) => {
+      const roleTypeIds = rolesByContactId.get(c.id) || [];
+      return {
+        id: c.id,
+        name: [c.properties.firstname, c.properties.lastname].filter(Boolean).join(' ') || '(no name)',
+        title: c.properties.jobtitle || null,
+        email: c.properties.email || null,
+        phone: c.properties.phone || null,
+        url: hubspotRecordUrl('contact', c.id),
+        roles: roleTypeIds
+          .slice()
+          .sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b))
+          .map((id) => ROLE_LABELS_BY_TYPE_ID[id]),
+        _rank: bestRoleRank(roleTypeIds),
+      };
+    })
+    .sort((a, b) => a._rank - b._rank || a.name.localeCompare(b.name))
+    .map(({ _rank, ...contact }) => contact);
 }
 
 module.exports = { getKeyContactsForCompany };
