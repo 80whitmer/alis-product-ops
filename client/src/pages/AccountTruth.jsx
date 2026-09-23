@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAccounts, getContractTruth } from '../api.js';
 
 function formatCents(cents) {
@@ -15,7 +15,14 @@ export default function AccountTruth() {
   const [truthLoading, setTruthLoading] = useState(false);
   const [truthError, setTruthError] = useState(null);
 
+  // Same StrictMode double-invoke guard as Dashboard.jsx — this route now
+  // runs the same expensive portfolio-wide ticket-history pull
+  // (server/api/accounts.js) as /api/export, so a second concurrent fetch
+  // here is exactly as likely to trip HubSpot's rate limit.
+  const initialLoadRef = useRef(false);
   useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
     getAccounts().then((d) => setAccounts(d.companies)).catch((err) => setLoadError(err.message));
   }, []);
 
@@ -24,6 +31,19 @@ export default function AccountTruth() {
     if (!q) return accounts;
     return accounts.filter((a) => a.name?.toLowerCase().includes(q));
   }, [accounts, search]);
+
+  // Starting a new search should clear whatever account was previously
+  // selected below — otherwise that account's full detail card (tags,
+  // deals table) keeps sitting on the page, disconnected from whatever
+  // you're now searching for (confirmed confusing live, Sep 2026: typing
+  // a new search while "Albert's House" was still selected left its detail
+  // card showing underneath the newly-filtered list).
+  function handleSearchChange(value) {
+    setSearch(value);
+    setSelected(null);
+    setTruth(null);
+    setTruthError(null);
+  }
 
   function selectAccount(account) {
     setSelected(account);
@@ -54,7 +74,7 @@ export default function AccountTruth() {
         <input
           placeholder="Search accounts…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
           style={{ width: '100%', marginBottom: 12 }}
         />
         {loadError && <div className="notice danger">{loadError}</div>}
