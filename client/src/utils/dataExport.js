@@ -41,6 +41,8 @@ function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
     { header: 'Open Deals', key: 'openDealsCount', width: 11 },
     { header: 'Open Deal Value ($)', key: 'openDealValue', width: 16 },
     { header: `ARR Added (${new Date().getFullYear()}) ($)`, key: 'arrAdded', width: 16 },
+    { header: 'Open Enhancement Requests', key: 'openEnhancementCount', width: 14 },
+    { header: 'Closed Enhancement Requests', key: 'closedEnhancementCount', width: 14 },
     { header: 'Last Activity', key: 'lastActivityDate', width: 14 },
     { header: 'Lifecycle Stage (raw)', key: 'lifecycleStage', width: 20 },
   ];
@@ -56,6 +58,8 @@ function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
       openDealsCount: c.openDealsCount,
       openDealValue: usd(c.openDealValueCents),
       arrAdded: usd(c.arrAddedThisYearCents),
+      openEnhancementCount: c.openEnhancementCount ?? 0,
+      closedEnhancementCount: c.closedEnhancementCount ?? 0,
       lastActivityDate: c.lastActivityDate ? c.lastActivityDate.slice(0, 10) : '',
       lifecycleStage: c.lifecycleStage,
     });
@@ -104,12 +108,12 @@ function addRequestsSheet(workbook, requests, sheetName) {
   return sheet;
 }
 
-/** The holistic export — both sheets, one file. */
+/** The holistic export — both sheets, one file. `requests` is now the full open+closed ticket history (see server/api/export.js), so this sheet filters to what's still open to match its original "Active Requests" scope. */
 export async function exportDataToExcel({ companies, requests, generatedAt }) {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date(generatedAt);
   addAccountsSheet(workbook, companies);
-  addRequestsSheet(workbook, requests, 'Active Requests');
+  addRequestsSheet(workbook, requests.filter((r) => r.isOpen), 'Active Requests');
   await download(workbook, `alis-product-data-${generatedAt.slice(0, 10)}.xlsx`);
 }
 

@@ -1,16 +1,19 @@
 /**
- * Portfolio-wide "currently active requests" pull — the raw evidence data
- * for view #1 in docs/CONTEXT.md, minus the scoring. Per the 2026-09-21
- * pivot: don't compute a score, don't merge Jira in yet — just get the
- * HubSpot half of the picture (account, ARR, tier, category, stage, age)
- * out as clean rows so Trisha's/BI's team can plug it into whatever they're
- * already using (their #bi-priority Google Sheet, DOMO, etc.) instead of
- * hand-copying it.
+ * Portfolio-wide ticket history pull — every ALIS Escalation / Enhancement
+ * Request ticket (open AND closed) within `lookbackDays`, joined to its
+ * account. Broader than the original v1 "currently active requests" export
+ * (see git history): the trend/heatmap charts on the dashboard need closed
+ * tickets' `closedAt` too, not just what's still open today.
  *
- * Same category_2_0 convention as alis-hub's server/services/hubspotTickets.js
- * (see that file's doc comment for the "true"/"false" stored-value quirk).
+ * Same category_2_0 convention, and the same open/closed/Top-3
+ * classification rules, as alis-hub's server/services/hubspotTickets.js —
+ * ported and adapted for a single portfolio-wide search instead of that
+ * file's per-company association pull (616 companies × per-company calls
+ * would be far too slow/rate-limited here; one paginated ticket search plus
+ * a batch company-association lookup scales the same way
+ * hubspotAccounts.js's company pull already does).
  */
-const { hubspotRequest, chunk, hubspotRecordUrl, getPipelineStageLabels, batchGetCompanyIdsFor } = require('./hubspotClient');
+const { hubspotRequest, getPipelineStageLabels, batchGetCompanyIdsFor, hubspotRecordUrl } = require('./hubspotClient');
 
 const CATEGORY_2_0_LABELS = {
   false: 'General Question',
@@ -19,24 +22,28 @@ const CATEGORY_2_0_LABELS = {
   'ALIS Bug': 'ALIS Escalation',
 };
 
-// Only these stage labels count as "currently active" — same convention as
-// alis-hub (Client Submitted/In Progress = someone needs to act; Top 3
-// Enhancements/Long-Term Projects = tracked enhancement work). Everything
-// else (closed, spam, waiting-for-confirmation, etc.) is excluded rather
-// than exported and left for the consumer to filter out by hand.
-const ACTIVE_STAGE_LABELS = new Set(['Client Submitted', 'In Progress', 'Top 3 Enhancements', 'Long-Term Projects']);
+// Internal team/process-tracking noise, not client support work — same
+// exclusion alis-hub applies at its one shared ticket source, so every
+// downstream count/chart here is clean without a separate fix per section.
+const EXCLUDED_CATEGORY = 'ALIS Internal';
+
+// The pipeline-stage label a ticket must resolve to for it to count as
+// "status-flagged Top 3" — same signal as alis-hub's TOP_3_STATUS_LABEL, one
+// of two independent Top-3 signals (the other is the `top_3` tag property);
+// a ticket carrying either counts.
+const TOP_3_STATUS_LABEL = 'Top 3 Enhancements';
 
 const TICKET_PROPERTIES = [
   'subject', 'hs_pipeline', 'hs_pipeline_stage', 'category_2_0', 'hs_ticket_category',
-  'hs_ticket_priority', 'createdate', 'hs_lastmodifieddate', 'top_3',
+  'hs_ticket_priority', 'createdate', 'hs_lastmodifieddate', 'closed_date', 'top_3', 'next_step',
 ];
 
 function daysBetween(fromIso, toDate) {
   if (!fromIso) return null;
-  return Math.floor((toDate.getTime() - new Date(fromIso).getTime()) / 86400000);
+  return Math.round((toDate.getTime() - new Date(fromIso).getTime()) / 86400000);
 }
 
-/** Every ticket touched in the last `lookbackDays` — a bounded proxy for "not stale/closed" that doesn't require knowing every pipeline's closed-stage IDs up front. */
+/** Every ticket touched in the last `lookbackDays` — a bounded proxy for "not ancient/irrelevant" that doesn't require knowing every pipeline's closed-stage IDs up front. Closing a ticket touches hs_lastmodifieddate, so any ticket closed within the window is captured even if it's old; a long-open, long-untouched ticket can still fall outside it, same tradeoff the original v1 export accepted. */
 async function searchRecentTickets(lookbackDays) {
   const sinceIso = new Date(Date.now() - lookbackDays * 86400000).toISOString();
   const tickets = [];
@@ -61,53 +68,61 @@ async function searchRecentTickets(lookbackDays) {
 }
 
 /**
- * Returns raw rows: one per currently-active ticket, joined to its
- * associated company (by whichever `companiesById` map the caller passes
- * in, from hubspotAccounts.getAllHomeOfficeCompanies) where one exists. No
- * scoring — ARR/tier are included as columns, not multiplied into anything.
+ * Returns raw rows: one per ticket (open or closed) touched in the lookback
+ * window, joined to its associated company where one exists, tagged with
+ * the classification flags (isEscalation/isEnhancementRequest/isTopThree/
+ * isOpen) the dashboard's stat tiles, tier charts, and trend/heatmap charts
+ * all key off of. No scoring — ARR/tier are columns, not multiplied into
+ * anything.
  */
-async function getActiveRequestRows({ lookbackDays = 120, companiesById = new Map() } = {}) {
+async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() } = {}) {
   const rawTickets = await searchRecentTickets(lookbackDays);
 
   let stageLabels = new Map();
   try {
     stageLabels = await getPipelineStageLabels('tickets');
   } catch {
-    // Falls through to raw pipeline/stage IDs below — still useful, just less readable.
+    // Falls through to raw pipeline/stage IDs below — still useful, just less readable, and isTopThree falls back to the tag-only signal.
   }
 
   const now = new Date();
-  const active = rawTickets.filter((t) => {
-    const label = stageLabels.get(`${t.properties.hs_pipeline}:${t.properties.hs_pipeline_stage}`);
-    return label ? ACTIVE_STAGE_LABELS.has(label.stage) : false;
-  });
+  const companyIdsByTicket = await batchGetCompanyIdsFor('tickets', rawTickets.map((t) => t.id));
 
-  const companyIdsByTicket = await batchGetCompanyIdsFor('tickets', active.map((t) => t.id));
-
-  return active.map((t) => {
-    const p = t.properties;
-    const label = stageLabels.get(`${p.hs_pipeline}:${p.hs_pipeline_stage}`);
-    const companyId = (companyIdsByTicket.get(t.id) || [])[0] || null;
-    const company = companyId ? companiesById.get(companyId) : null;
-    const rawCategory = p.category_2_0 || p.hs_ticket_category || null;
-    return {
-      ticketId: t.id,
-      subject: p.subject || '(no subject)',
-      category: rawCategory != null ? (CATEGORY_2_0_LABELS[rawCategory] ?? rawCategory) : null,
-      pipeline: label?.pipeline || p.hs_pipeline,
-      stage: label?.stage || p.hs_pipeline_stage,
-      priority: p.hs_ticket_priority || null,
-      createdAt: p.createdate || null,
-      lastModifiedAt: p.hs_lastmodifieddate || null,
-      ageDays: daysBetween(p.createdate, now),
-      companyId,
-      companyName: company?.name || (companyId ? '(company not in portfolio list)' : null),
-      arrCents: company?.arrCents ?? null,
-      tier: company?.tier ?? null,
-      accountManagerName: company?.accountManagerName ?? null,
-      url: hubspotRecordUrl('ticket', t.id),
-    };
-  });
+  return rawTickets
+    .map((t) => {
+      const p = t.properties;
+      const label = stageLabels.get(`${p.hs_pipeline}:${p.hs_pipeline_stage}`);
+      const rawCategory = p.category_2_0 || p.hs_ticket_category || null;
+      const category = rawCategory != null ? (CATEGORY_2_0_LABELS[rawCategory] ?? rawCategory) : null;
+      const isOpen = !p.closed_date;
+      const companyId = (companyIdsByTicket.get(t.id) || [])[0] || null;
+      const company = companyId ? companiesById.get(companyId) : null;
+      return {
+        ticketId: t.id,
+        subject: p.subject || '(no subject)',
+        category,
+        isEscalation: category === 'ALIS Escalation',
+        isEnhancementRequest: category === 'Enhancement' || /enhancement/i.test(p.subject || ''),
+        isTopThree: (p.top_3 != null && p.top_3 !== '') || label?.stage === TOP_3_STATUS_LABEL,
+        isOpen,
+        pipeline: label?.pipeline || p.hs_pipeline,
+        stage: label?.stage || p.hs_pipeline_stage,
+        priority: p.hs_ticket_priority || null,
+        createdAt: p.createdate || null,
+        closedAt: p.closed_date || null,
+        lastModifiedAt: p.hs_lastmodifieddate || null,
+        ageDays: daysBetween(p.createdate, isOpen ? now : new Date(p.closed_date)),
+        nextStep: p.next_step || null,
+        companyId,
+        companyName: company?.name || (companyId ? '(company not in portfolio list)' : null),
+        arrCents: company?.arrCents ?? null,
+        tier: company?.tier ?? null,
+        totalCapacity: company?.totalCapacity ?? null,
+        accountManagerName: company?.accountManagerName ?? null,
+        url: hubspotRecordUrl('ticket', t.id),
+      };
+    })
+    .filter((t) => t.category !== EXCLUDED_CATEGORY);
 }
 
-module.exports = { getActiveRequestRows };
+module.exports = { getTicketHistory };

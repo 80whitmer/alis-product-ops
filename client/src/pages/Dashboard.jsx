@@ -3,6 +3,7 @@ import { getExportData, getKeyContacts } from '../api.js';
 import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
+import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -16,14 +17,6 @@ const OVERVIEW_SECTIONS = [
   { category: 'Everything', items: ['Accounts'] },
 ];
 
-// Same label alis-hub's ticket pipelines use for a ticket staged as one of
-// an account's Top 3 Enhancement asks (see hubspotRequests.js) — a stage,
-// not a category, so it's pulled from `stage`, not `category`.
-const TOP_3_STAGE = 'Top 3 Enhancements';
-// hubspotRequests.js's CATEGORY_2_0_LABELS maps the portal's "ALIS Bug"
-// category_2_0 value to this label — the closest thing to a structured
-// "this is an escalation" flag the data has today.
-const ESCALATION_CATEGORY = 'ALIS Escalation';
 
 /** Collapsible white card, same fold/jump pattern as alis-hub's own dashboards — click the title to fold; jumping here from QuickJumpNav/FloatingSectionNav always unfolds it first. */
 function SectionCard({ title, description, action, accent, defaultExpanded = true, children }) {
@@ -157,8 +150,8 @@ function SectionExportButton({ onExport }) {
 
 const REQUEST_COLUMNS = 10;
 
-// 10 data columns + the trailing "expand for key contacts" column.
-const ACCOUNT_COLUMNS = 11;
+// 12 data columns + the trailing "expand for key contacts" column.
+const ACCOUNT_COLUMNS = 13;
 
 const ACCOUNT_SORT_COLUMNS = [
   { key: 'name', label: 'Company' },
@@ -170,6 +163,8 @@ const ACCOUNT_SORT_COLUMNS = [
   { key: 'openDealsCount', label: 'Open Deals', title: 'Deals not yet closed, associated with this account' },
   { key: 'openDealValueCents', label: 'Open Deal Value', title: "Sum of ARR value across this account's open deals" },
   { key: 'arrAddedThisYearCents', label: `ARR Added (${new Date().getFullYear()})`, title: 'Sum of ARR value across deals closed-won this calendar year' },
+  { key: 'openEnhancementCount', label: 'Open Enh. Requests', title: 'Open Enhancement Request tickets for this account' },
+  { key: 'closedEnhancementCount', label: 'Closed Enh. Requests', title: 'Closed Enhancement Request tickets for this account, last ~13 months' },
   { key: 'lastActivityDate', label: 'Last Activity', title: 'Last time a note, call, email, meeting, or task was logged for this account in HubSpot' },
 ];
 
@@ -177,6 +172,7 @@ const ACCOUNT_SORT_COLUMNS = [
 // (company name, AM name, the ISO date string) sorts fine as plain text.
 const NUMERIC_ACCOUNT_KEYS = new Set([
   'tier', 'arrCents', 'communityCount', 'totalCapacity', 'openDealsCount', 'openDealValueCents', 'arrAddedThisYearCents',
+  'openEnhancementCount', 'closedEnhancementCount',
 ]);
 
 function compareAccounts(a, b, key, dir) {
@@ -216,6 +212,8 @@ function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
         <td>{a.openDealsCount ?? 0}</td>
         <td>{usd(a.openDealValueCents)}</td>
         <td>{usd(a.arrAddedThisYearCents)}</td>
+        <td>{a.openEnhancementCount ?? 0}</td>
+        <td>{a.closedEnhancementCount ?? 0}</td>
         <td>{a.lastActivityDate ? a.lastActivityDate.slice(0, 10) : '—'}</td>
         <td className="text-center text-neutral-400" title="Click to view key contacts">{expanded ? '▲' : '▼'}</td>
       </tr>
@@ -422,11 +420,19 @@ export default function Dashboard() {
   }, [filteredAccounts, accountSort]);
 
   const top3Enhancements = useMemo(
-    () => (data ? data.requests.filter((r) => r.stage === TOP_3_STAGE) : []),
+    () => (data ? data.requests.filter((r) => r.isOpen && r.isTopThree) : []),
+    [data]
+  );
+  const closedTop3Enhancements = useMemo(
+    () => (data ? data.requests.filter((r) => !r.isOpen && r.isTopThree) : []),
     [data]
   );
   const escalations = useMemo(
-    () => (data ? data.requests.filter((r) => r.category === ESCALATION_CATEGORY) : []),
+    () => (data ? data.requests.filter((r) => r.isOpen && r.isEscalation) : []),
+    [data]
+  );
+  const closedEscalations = useMemo(
+    () => (data ? data.requests.filter((r) => !r.isOpen && r.isEscalation) : []),
     [data]
   );
 
@@ -443,7 +449,11 @@ export default function Dashboard() {
     [data]
   );
   const enhancementRequests = useMemo(
-    () => (data ? data.requests.filter((r) => (r.category || '').toLowerCase().includes('enhancement') || (r.category || '').toUpperCase() === 'FEATURE_REQUEST') : []),
+    () => (data ? data.requests.filter((r) => r.isOpen && r.isEnhancementRequest) : []),
+    [data]
+  );
+  const closedEnhancementRequests = useMemo(
+    () => (data ? data.requests.filter((r) => !r.isOpen && r.isEnhancementRequest) : []),
     [data]
   );
   return (
@@ -536,6 +546,7 @@ export default function Dashboard() {
             defaultExpanded={false}
             action={<SectionExportButton onExport={() => exportRequestsToExcel(top3Enhancements, 'Top 3 Enhancements', data.generatedAt)} />}
           >
+            <EnhancementCharts openItems={top3Enhancements} closedItems={closedTop3Enhancements} topThreeOnly />
             <RequestsTable requests={top3Enhancements} emptyLabel="No tickets currently staged as Top 3 Enhancements." />
           </SectionCard>
 
@@ -546,6 +557,7 @@ export default function Dashboard() {
             defaultExpanded={false}
             action={<SectionExportButton onExport={() => exportRequestsToExcel(escalations, 'Escalations', data.generatedAt)} />}
           >
+            <EscalationCharts openItems={escalations} closedItems={closedEscalations} />
             <RequestsTable requests={escalations} emptyLabel="No open escalations right now." />
           </SectionCard>
 
@@ -555,6 +567,7 @@ export default function Dashboard() {
             defaultExpanded={false}
             action={<SectionExportButton onExport={() => exportRequestsToExcel(enhancementRequests, 'Enhancement Tickets', data.generatedAt)} />}
           >
+            <EnhancementCharts openItems={enhancementRequests} closedItems={closedEnhancementRequests} />
             <RequestsTable requests={enhancementRequests} emptyLabel="No enhancement requests right now." />
           </SectionCard>
         </>
