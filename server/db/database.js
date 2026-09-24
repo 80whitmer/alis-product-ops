@@ -267,6 +267,21 @@ function countEntitlementSnapshotCompanies() {
   return rows[0]?.n ?? 0;
 }
 
+/**
+ * One row per checked company with when it was last checked — the
+ * "confirmed as of" freshness signal the portfolio-wide adoption % alone
+ * doesn't carry (Sep 2026, Aaron: building toward a portfolio audit view
+ * that tracks entitlements-confirmed over time, not just current state).
+ * Every flag row for a company shares the same captured_at (one run writes
+ * them all at once — see replaceEntitlementSnapshot), so MAX() here is
+ * really just "the" captured_at, not an aggregate across different runs.
+ */
+function listEntitlementFreshness() {
+  return queryAll(
+    'SELECT hubspot_company_id, company_name, MAX(captured_at) AS last_checked_at FROM entitlement_snapshots GROUP BY hubspot_company_id'
+  );
+}
+
 // Allowlisted, not arbitrary — `table` is interpolated directly into SQL below.
 const TABLES_WITH_UPDATED_AT = new Set(['alis_admin_ids', 'company_hosts']);
 
@@ -281,5 +296,5 @@ module.exports = {
   initDb, listDecisions, addDecision, deleteDecision, recordKpiMetricSnapshots, getKpiMetricHistory,
   listAlisAdminIds, getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
   listCompanyHosts, setCompanyHost, bulkSetCompanyHosts, deleteCompanyHost, getMaxUpdatedAt,
-  replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies,
+  replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies, listEntitlementFreshness,
 };

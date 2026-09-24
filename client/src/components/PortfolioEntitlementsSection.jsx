@@ -20,6 +20,65 @@ import { runPortfolioEntitlementsCheck, getPortfolioEntitlementsStatus } from '.
  * server/services/portfolioEntitlementsJob.js's broadcast() calls.
  */
 
+const STALE_AFTER_DAYS = 90;
+
+/**
+ * The freshness half of the portfolio audit (Sep 2026, Aaron: "track this
+ * over time" / "a full audit of entitlements confirmed") — cross-references
+ * the rollup's per-company `freshness` rows (only companies actually
+ * checked) against every account with an ALIS Admin Company ID on file, so
+ * "never checked" reads as its own gap rather than silently missing from
+ * the list the way it would if this only rendered what the server had rows
+ * for.
+ */
+function AuditFreshness({ companies, freshness }) {
+  const byId = new Map((freshness || []).map((f) => [f.hubspotCompanyId, f]));
+  const eligible = companies.filter((c) => c.alisAdminCompanyId);
+  const rows = eligible
+    .map((c) => ({ id: c.id, name: c.name, check: byId.get(c.id) || null }))
+    .sort((a, b) => {
+      const aAge = a.check?.ageDays ?? Infinity;
+      const bAge = b.check?.ageDays ?? Infinity;
+      return bAge - aAge;
+    });
+  const neverChecked = rows.filter((r) => !r.check).length;
+  const stale = rows.filter((r) => r.check?.stale).length;
+  const fresh = rows.length - neverChecked - stale;
+  const [open, setOpen] = useState(false);
+  const flagged = rows.filter((r) => !r.check || r.check.stale);
+
+  if (eligible.length === 0) return null;
+
+  return (
+    <div className="border border-neutral-200 rounded-lg p-3 mb-3">
+      <div className="flex items-center gap-3 flex-wrap text-sm">
+        <strong>Confirmed as of</strong>
+        <span className="text-emerald-700">{fresh} checked within {STALE_AFTER_DAYS}d</span>
+        <span className="text-amber-700">{stale} stale</span>
+        <span className="text-neutral-500">{neverChecked} never checked</span>
+        {flagged.length > 0 && (
+          <button className="text-xs text-accent-600 underline ml-auto" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Hide' : 'Show'} {flagged.length} needing a check
+          </button>
+        )}
+      </div>
+      {open && (
+        <table className="mt-2">
+          <thead><tr><th>Company</th><th>Last checked</th></tr></thead>
+          <tbody>
+            {flagged.map((r) => (
+              <tr key={r.id}>
+                <td>{r.name}</td>
+                <td className="text-neutral-500">{r.check ? `${r.check.ageDays}d ago` : 'Never'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function StatusBanner({ job }) {
   if (job.status === 'idle' && job.snapshotCompanyCount === 0) {
     return <p className="text-sm text-neutral-500 italic">No portfolio entitlement check has been run yet.</p>;
@@ -100,7 +159,7 @@ function LiveLog({ lines }) {
   );
 }
 
-export default function PortfolioEntitlementsSection({ companies, alisAdminIdCount }) {
+export default function PortfolioEntitlementsSection({ companies, alisAdminIdCount, onRollupChange }) {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [starting, setStarting] = useState(false);
@@ -125,7 +184,19 @@ export default function PortfolioEntitlementsSection({ companies, alisAdminIdCou
       setStatus((prev) => ({ ...prev, job: JSON.parse(e.data) }));
     });
     es.addEventListener('log', (e) => {
-      setLogLines((prev) => [...prev, JSON.parse(e.data)]);
+      const line = JSON.parse(e.data);
+      setLogLines((prev) => [...prev, line]);
+      // The "Checking X of Y" header/progress bar used to only update on
+      // connect (the `snapshot` event) or when the run finished — every log
+      // line in between was appended to the scrolling log but never touched
+      // `status.job`, so the header/bar visibly froze mid-run while the log
+      // kept moving (Sep 2026, Aaron: "stayed at 67 and didn't really
+      // advance"). Each `done`/`error` log line now also carries the
+      // progress numbers, so this updates every account instead of only at
+      // the start and end.
+      if (line.processed != null) {
+        setStatus((prev) => (prev ? { ...prev, job: { ...prev.job, processed: line.processed, total: line.total, currentCompany: line.currentCompany } } : prev));
+      }
     });
     es.addEventListener('complete', (e) => {
       setStatus((prev) => ({ ...prev, job: JSON.parse(e.data) }));
@@ -166,6 +237,15 @@ export default function PortfolioEntitlementsSection({ companies, alisAdminIdCou
   const rollup = status?.rollup;
   const running = job?.status === 'running';
 
+  // Reports the rollup up to the Dashboard (Sep 2026, Aaron: "move the
+  // Export to Excel button to the right in line with the other sections
+  // that have this button") — the export button now lives in this
+  // SectionCard's header action slot like every other section's, which
+  // means Dashboard.jsx needs the rollup, not just this component.
+  useEffect(() => {
+    onRollupChange?.(rollup || null);
+  }, [rollup, onRollupChange]);
+
   return (
     <div>
       <p className="text-xs text-neutral-500 mb-3">
@@ -177,6 +257,7 @@ export default function PortfolioEntitlementsSection({ companies, alisAdminIdCou
       {error && <div className="notice danger mb-3">{error}</div>}
       {job && <StatusBanner job={job} />}
       <LiveLog lines={logLines} />
+      {rollup && <AuditFreshness companies={companies} freshness={rollup.freshness} />}
       {rollup && rollup.categories.length > 0 && (
         <div className="mt-2">
           {rollup.categories.map((c) => <CategoryBlock key={c.name} category={c} />)}

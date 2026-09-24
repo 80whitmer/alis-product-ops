@@ -61,10 +61,22 @@ const TIER_COLOR_ARGB = { 'Tier 1': 'FF16A34A', 'Tier 2': 'FF2563EB', 'Tier 3': 
 // crash ExcelJS's renderer or always fill 100%. Column C already holds a
 // 0-1 fraction (that tier's share of the portfolio total), so explicit
 // numeric bounds of 0 and 1 make the bar length mean what it should.
-function addDataBar(sheet, ref, argb) {
+// Excel's conditional-formatting schema requires each rule's priority to be
+// unique within a worksheet; every call here used to hardcode priority: 1,
+// which is what triggered the "Repaired Records" corruption dialog on open
+// (Sep 2026 — a workbook with 15 same-priority dataBar rules on one sheet).
+// A per-sheet counter keeps every rule's priority distinct.
+let dataBarPriorityCounter = 0;
+
+function resetDataBarPriority() {
+  dataBarPriorityCounter = 0;
+}
+
+function addDataBar(sheet, ref, argb, min = 0, max = 1) {
+  dataBarPriorityCounter += 1;
   sheet.addConditionalFormatting({
     ref,
-    rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'num', value: 1 }], color: { argb }, priority: 1 }],
+    rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: min }, { type: 'num', value: max }], color: { argb }, priority: dataBarPriorityCounter }],
   });
 }
 
@@ -81,6 +93,7 @@ function addDataBar(sheet, ref, argb) {
  * to the raw Accounts/Requests sheets.
  */
 function addOverviewSheet(workbook, { companies, kpi, totals, generatedAt }) {
+  resetDataBarPriority();
   const sheet = workbook.addWorksheet('Overview', { views: [{ state: 'frozen', ySplit: 0 }] });
   sheet.columns = [{ width: 26 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }];
 
@@ -297,14 +310,68 @@ export function computeExportTotals(companies, requests) {
   };
 }
 
-export async function exportDataToExcel({ companies, requests, generatedAt, kpi }) {
+/**
+ * "Entitlements" sheet — one row per (category, flag), same rollup the
+ * on-screen Portfolio Entitlements section shows (Sep 2026, Aaron: "make
+ * sure the Portfolio entitlements are exportable... rolled up into the
+ * Dashboard exportables"). `rollup` is the same shape
+ * getPortfolioEntitlementRollup() returns ({ companiesChecked, categories:
+ * [{ name, flags: [{ label, enabledCount, totalCount, pctEnabled }] }] }) —
+ * only added when a check has actually been run (categories.length > 0),
+ * since an empty sheet with no data would just be noise.
+ */
+function addEntitlementsSheet(workbook, rollup, sheetName = 'Entitlements') {
+  resetDataBarPriority();
+  const sheet = workbook.addWorksheet(sheetName);
+  sheet.columns = [{ width: 22 }, { width: 32 }, { width: 14 }, { width: 12 }, { width: 14 }];
+
+  sheet.mergeCells('A1:E1');
+  sheet.getCell('A1').value = 'Portfolio Entitlements';
+  sheet.getCell('A1').font = { size: 16, bold: true, color: { argb: 'FF1E293B' } };
+  sheet.mergeCells('A2:E2');
+  sheet.getCell('A2').value = `${rollup.companiesChecked} account(s) checked — a manual, on-demand ALIS admin scrape, not part of the regular Refresh.`;
+  sheet.getCell('A2').font = { size: 10.5, color: { argb: 'FF78716C' } };
+
+  const headerRow = sheet.addRow(['Category', 'Flag', 'Enabled', 'Total Checked', '% Enabled']);
+  headerRow.font = { bold: true };
+
+  let r = 4;
+  for (const category of rollup.categories) {
+    for (const flag of category.flags) {
+      sheet.getCell(`A${r}`).value = category.name;
+      sheet.getCell(`B${r}`).value = flag.label;
+      sheet.getCell(`C${r}`).value = flag.enabledCount;
+      sheet.getCell(`D${r}`).value = flag.totalCount;
+      sheet.getCell(`E${r}`).value = flag.pctEnabled / 100;
+      sheet.getCell(`E${r}`).numFmt = '0.0%';
+      addDataBar(sheet, `E${r}:E${r}`, 'FF2563EB');
+      r += 1;
+    }
+  }
+}
+
+export async function exportDataToExcel({ companies, requests, generatedAt, kpi, entitlementsRollup }) {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date(generatedAt);
   const totals = computeExportTotals(companies, requests);
   addOverviewSheet(workbook, { companies, kpi, totals, generatedAt });
   addAccountsSheet(workbook, companies);
+  // ALIS Pay / Support Pipeline tickets are excluded portfolio-wide at the
+  // source (server/services/hubspotRequests.js) — `requests` here is
+  // already Account Management only.
   addRequestsSheet(workbook, requests.filter((r) => r.isOpen), 'Active Requests');
+  if (entitlementsRollup?.categories?.length) {
+    addEntitlementsSheet(workbook, entitlementsRollup);
+  }
   await download(workbook, `alis-product-data-${generatedAt.slice(0, 10)}.xlsx`);
+}
+
+/** Per-section export — the Portfolio Entitlements section's own button. */
+export async function exportEntitlementsToExcel(rollup, generatedAt) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.created = new Date(generatedAt);
+  addEntitlementsSheet(workbook, rollup);
+  await download(workbook, `alis-product-hub-entitlements-${generatedAt.slice(0, 10)}.xlsx`);
 }
 
 /** Per-section export — the Accounts section's own button. */
@@ -433,12 +500,12 @@ function downloadBlob(blob, filename) {
  * computeExportTotals() the Excel Overview sheet uses, so the two exports
  * can never tell a different story about the same numbers.
  */
-export async function exportDashboardToPdf({ companies, requests, kpi, generatedAt }) {
+export async function exportDashboardToPdf({ companies, requests, kpi, generatedAt, entitlementsRollup }) {
   const totals = computeExportTotals(companies, requests);
   const res = await fetch('/api/export/pdf', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ companies, totals, kpi, generatedAt }),
+    body: JSON.stringify({ companies, totals, kpi, generatedAt, entitlementsRollup }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

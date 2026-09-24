@@ -84,7 +84,33 @@ function top10TableHtml(companies) {
     </table>`;
 }
 
-function buildHtml({ companies, totals, kpi, generatedAt }) {
+/**
+ * Category-level entitlements summary — one bar per category showing its
+ * average % enabled (Sep 2026, Aaron: "rolled up into the Dashboard
+ * exportables excel and PDF"). Deliberately category-level, not
+ * per-flag — a PDF page can't hold ~130 individual flag rows the way the
+ * Excel "Entitlements" sheet does (dataExport.js's addEntitlementsSheet);
+ * the full per-flag breakdown lives there instead.
+ */
+function entitlementsSectionHtml(rollup) {
+  if (!rollup?.categories?.length) return '';
+  const rows = rollup.categories.map((c) => {
+    const avgPct = c.flags.length > 0 ? Math.round((c.flags.reduce((s, f) => s + f.pctEnabled, 0) / c.flags.length) * 10) / 10 : 0;
+    return { label: `${c.name} (${c.flags.length})`, pct: avgPct };
+  });
+  const barRows = rows.map((r) => `
+      <div class="bar-row">
+        <span class="bar-label" style="width:140px">${esc(r.label)}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${r.pct}%; background:#2563eb"></div></div>
+        <span class="bar-value">${r.pct}%</span>
+      </div>`).join('');
+  return `
+  <h2>Portfolio Entitlements</h2>
+  <p class="subtitle" style="margin-bottom:10px">${esc(rollup.companiesChecked)} account(s) checked — a manual, on-demand ALIS admin scrape. Per-flag detail is in the Excel export's Entitlements sheet.</p>
+  <div class="chart-block">${barRows}</div>`;
+}
+
+function buildHtml({ companies, totals, kpi, generatedAt, entitlementsRollup }) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   body { font-family: -apple-system, Arial, sans-serif; color: #1c1917; padding: 32px; font-size: 12px; }
@@ -139,15 +165,17 @@ function buildHtml({ companies, totals, kpi, generatedAt }) {
   <h2>Top 10 Accounts by ARR</h2>
   ${top10TableHtml(companies)}
 
+  ${entitlementsSectionHtml(entitlementsRollup)}
+
   <p class="footer">Generated ${esc(new Date().toLocaleString())} — ALIS Product Hub</p>
 </body></html>`;
 }
 
 /** Renders the portfolio Dashboard report to a PDF Buffer. `totals` is the same enhancement/escalation/portfolio rollup dataExport.js's Excel Overview sheet computes — passed in from the client rather than recomputed here so the two exports can never drift apart on methodology. */
-async function renderDashboardPdf({ companies, totals, kpi, generatedAt }) {
+async function renderDashboardPdf({ companies, totals, kpi, generatedAt, entitlementsRollup }) {
   const page = await newPage();
   try {
-    await page.setContent(buildHtml({ companies, totals, kpi, generatedAt }), { waitUntil: 'networkidle' });
+    await page.setContent(buildHtml({ companies, totals, kpi, generatedAt, entitlementsRollup }), { waitUntil: 'networkidle' });
     return await page.pdf({ format: 'Letter', printBackground: true, margin: { top: '24px', bottom: '24px', left: '24px', right: '24px' } });
   } finally {
     await page.context().close();

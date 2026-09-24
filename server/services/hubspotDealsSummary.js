@@ -129,4 +129,12 @@ function getImplementationProjects(dealsWithCompany) {
     });
 }
 
+// Contract Truth (data-completeness: does each account have a closed-won
+// deal with an ARR value and close date on file) used to live here as a
+// portfolio-wide rollup for this app's Dashboard. Moved to alis-hub (Sep
+// 2026, Aaron: "I don't think these really need to be on the product
+// board") — see alis-hub's server/services/hubspotTickets.js's
+// computeContractTruth, now surfaced on both the Team AM board (portfolio
+// rollup) and the Account Health board (per-account).
+
 module.exports = { getDealsWithCompanyContext, getDealSummaryByCompany, getImplementationProjects };

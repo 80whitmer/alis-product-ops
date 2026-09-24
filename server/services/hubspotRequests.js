@@ -41,6 +41,14 @@ const ENHANCEMENT_FOCUS_PROPERTY = 'what_type_of_enhancement_request_is_this_';
 // downstream count/chart here is clean without a separate fix per section.
 const EXCLUDED_CATEGORY = 'ALIS Internal';
 
+// The portal's other two real ticket pipelines (see hubspotTickets.js's own
+// comment on this) — Account Management is the only one the product/BI team
+// tracks here. Excluded portfolio-wide at the source (Sep 2026, Aaron: "we
+// do not need the Support tickets or the ALIS Pay tickets at all - they can
+// stay home in hubspot") rather than per-export, so no KPI, chart, or table
+// on the Dashboard ever counts them either.
+const EXCLUDED_PIPELINES = new Set(['ALIS Pay', 'Support Pipeline']);
+
 // The pipeline-stage label a ticket must resolve to for it to count as
 // "status-flagged Top 3" — same signal as alis-hub's TOP_3_STATUS_LABEL, one
 // of two independent Top-3 signals (the other is the `top_3` tag property);
@@ -224,7 +232,7 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
         url: hubspotRecordUrl('ticket', t.id),
       };
     })
-    .filter((t) => t.category !== EXCLUDED_CATEGORY);
+    .filter((t) => t.category !== EXCLUDED_CATEGORY && !EXCLUDED_PIPELINES.has(t.pipeline));
 
   // Only escalations/enhancements — the two surfaces that show pinned notes
   // — so this stays a handful of batch calls, not one per ticket.

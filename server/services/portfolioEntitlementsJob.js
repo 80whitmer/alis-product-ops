@@ -9,8 +9,16 @@
  * RESULTS it writes along the way (entitlement_snapshots) do persist.
  */
 const { getLiveEntitlementsBulk } = require('./alisEntitlements');
-const { replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies } = require('../db/database');
+const {
+  replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies,
+  listEntitlementFreshness, recordKpiMetricSnapshots,
+} = require('../db/database');
 const { broadcast } = require('../api/broadcaster');
+
+// How stale a company's last check can be before the audit view flags it —
+// this check is manual/on-demand (not part of Refresh), so "never checked"
+// and "checked 8 months ago" both need to read as gaps, not silence.
+const STALE_AFTER_DAYS = 90;
 
 // Fixed channel id, not a per-run jobId — only one portfolio entitlement
 // check can ever be running at a time (see the state.status === 'running'
@@ -46,12 +54,12 @@ function startPortfolioEntitlementsCheck(accounts) {
       state.total = total;
       if (status === 'done') {
         state.processed = index + 1;
-        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName}` });
+        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName}`, processed: state.processed, total, currentCompany: companyName });
       }
       if (status === 'error') {
         state.processed = index + 1;
         state.errors.push({ companyName, error });
-        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName} — ERROR: ${error}`, level: 'error' });
+        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName} — ERROR: ${error}`, level: 'error', processed: state.processed, total, currentCompany: companyName });
       }
     },
     onSnapshot: async (hubspotCompanyId, companyName, flags) => {
@@ -61,6 +69,7 @@ function startPortfolioEntitlementsCheck(accounts) {
     .then(() => {
       state.status = 'done';
       state.finishedAt = new Date().toISOString();
+      recordEntitlementTrendSnapshot();
       broadcast(STREAM_CHANNEL, 'log', { msg: `Done. ${state.processed} of ${state.total} account(s) checked, ${state.errors.length} error(s).` });
       broadcast(STREAM_CHANNEL, 'complete', getStatus());
     })
@@ -86,6 +95,22 @@ function startPortfolioEntitlementsCheck(accounts) {
 function getPortfolioEntitlementRollup() {
   const rows = listEntitlementSnapshots();
   const companiesChecked = new Set(rows.map((r) => r.hubspot_company_id)).size;
+
+  // Per-company "confirmed as of" — the caller (PortfolioEntitlementsSection)
+  // already has the full company list (with alisAdminCompanyId) to diff
+  // against, so this only needs to report what's actually been checked, not
+  // guess at what should have been.
+  const now = Date.now();
+  const freshness = listEntitlementFreshness().map((r) => {
+    const ageDays = Math.floor((now - new Date(r.last_checked_at).getTime()) / 86400000);
+    return {
+      hubspotCompanyId: r.hubspot_company_id,
+      companyName: r.company_name,
+      lastCheckedAt: r.last_checked_at,
+      ageDays,
+      stale: ageDays > STALE_AFTER_DAYS,
+    };
+  });
 
   // Grouped by (category, label), NOT flag_id — confirmed live (Sep 2026):
   // ALIS's entitlement checkbox ids carry a per-company numeric suffix
@@ -115,7 +140,24 @@ function getPortfolioEntitlementRollup() {
     .map(([name, categoryFlags]) => ({ name, flags: categoryFlags }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { companiesChecked, categories };
+  return { companiesChecked, categories, freshness };
+}
+
+/**
+ * Writes today's per-flag adoption % into the same kpi_metric_history table
+ * the ARR/Companies/Communities-by-tier trend charts already use — one
+ * point per calendar day, so a trend line "falls out" for free the next
+ * time this check is run, without a separate history table (Sep 2026,
+ * Aaron: "incredible to... track this over time"). Called once a run
+ * finishes rather than per-account, since the % is only meaningful once
+ * the whole run's flags are in.
+ */
+function recordEntitlementTrendSnapshot() {
+  const { categories } = getPortfolioEntitlementRollup();
+  const rows = categories.flatMap((c) => c.flags.map((f) => ({
+    scope: 'entitlement', scopeKey: f.flagId, metricKey: 'pctEnabled', value: f.pctEnabled,
+  })));
+  if (rows.length > 0) recordKpiMetricSnapshots(rows);
 }
 
 module.exports = { startPortfolioEntitlementsCheck, getStatus, getPortfolioEntitlementRollup };

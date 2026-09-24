@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getKeyContacts } from '../api.js';
+import { getKeyContacts, getPortfolioEntitlementsStatus } from '../api.js';
 import { useDataCache } from '../DataCache.jsx';
-import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel, exportKeyContactsToExcel, exportDashboardToPdf } from '../utils/dataExport.js';
+import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel, exportKeyContactsToExcel, exportDashboardToPdf, exportEntitlementsToExcel } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
@@ -223,7 +223,7 @@ function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
     <>
       <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
         <td>
-          {a.name}
+          <span className="font-semibold text-neutral-900">{a.name}</span>
           <AlisQuickLinks companyHost={a.companyHost} alisAdminCompanyId={a.alisAdminCompanyId} className="ml-1.5 align-middle" />
         </td>
         <td>{a.accountManagerName || '—'}</td>
@@ -565,6 +565,16 @@ export default function Dashboard() {
     }
   }
 
+  // Fed by PortfolioEntitlementsSection's onRollupChange once that section
+  // has fetched a rollup at least once — used only for that SectionCard's
+  // own header export button (Sep 2026, Aaron: "move the Export to Excel
+  // button to the right in line with the other sections"). The main
+  // toolbar Export to Excel/PDF buttons below fetch this fresh themselves
+  // instead of reading this state, so they still include entitlements even
+  // if this section has never been expanded (its child, and this callback,
+  // don't mount until the section is opened at least once).
+  const [entitlementsRollup, setEntitlementsRollup] = useState(null);
+
   // Loads once per app session (cached in DataCache.jsx, above the routes,
   // so it survives navigating away and back) rather than on every mount —
   // Aaron, Sep 2026: "I don't like the auto refresh... make the refresh
@@ -575,11 +585,22 @@ export default function Dashboard() {
     ensureDashboardLoaded();
   }, [ensureDashboardLoaded]);
 
+  /** Best-effort — the Portfolio Entitlements check is separate/manual (Sep 2026, Aaron: "make sure the Portfolio entitlements are... rolled up into the Dashboard exportables"); a failed fetch here shouldn't block the rest of the export, it just means that sheet/section is skipped. */
+  async function fetchEntitlementsRollup() {
+    try {
+      const status = await getPortfolioEntitlementsStatus();
+      return status.rollup;
+    } catch {
+      return null;
+    }
+  }
+
   async function handleExport() {
     if (!data) return;
     setExporting(true);
     try {
-      await exportDataToExcel(data);
+      const entitlementsRollup = await fetchEntitlementsRollup();
+      await exportDataToExcel({ ...data, entitlementsRollup });
     } finally {
       setExporting(false);
     }
@@ -592,7 +613,8 @@ export default function Dashboard() {
     setExportingPdf(true);
     setPdfExportError('');
     try {
-      await exportDashboardToPdf(data);
+      const entitlementsRollup = await fetchEntitlementsRollup();
+      await exportDashboardToPdf({ ...data, entitlementsRollup });
     } catch (err) {
       setPdfExportError(err.message);
     } finally {
@@ -730,7 +752,11 @@ export default function Dashboard() {
 
       {data && (
         <>
-          <SectionCard title="Overview" description={`As of ${new Date(data.generatedAt).toLocaleString()}`}>
+          <SectionCard
+            title="Overview"
+            description={`As of ${new Date(data.generatedAt).toLocaleString()} — portfolio-wide KPI tiles (ARR, Accounts, Communities, Capacity, Enhancement Requests, Escalations) plus a jump menu to every section below, grouped by Accounts/Tickets.`}
+            defaultExpanded={false}
+          >
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-5 mb-6">
               <StatTile label="Portfolio ARR" value={usd(totalArrCents)} jumpTo="Accounts" tooltip="Sum of HubSpot's own company-level ARR field across every account" wide />
               <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" tooltip="Every Home Office account in HubSpot" />
@@ -753,7 +779,6 @@ export default function Dashboard() {
           <SectionCard
             title="Accounts"
             description={`Every active Home Office account, its account manager, tier, and ARR — search to narrow.${data.inactiveCompanyCount ? ` ${data.inactiveCompanyCount} inactive accounts (Tier 0/blank with no ARR) are hidden.` : ''}`}
-            defaultExpanded={false}
             action={<SectionExportButton onExport={() => exportAccountsToExcel(filteredAccounts, data.generatedAt)} />}
           >
             <input
@@ -805,8 +830,15 @@ export default function Dashboard() {
             title="Portfolio Entitlements"
             description="What percentage of live ALIS environments have each entitlement turned on — a manual, on-demand check (not part of the regular Refresh) across every account with an ALIS Admin Company ID on file."
             defaultExpanded={false}
+            action={entitlementsRollup?.categories?.length > 0 && (
+              <SectionExportButton onExport={() => exportEntitlementsToExcel(entitlementsRollup, new Date().toISOString())} />
+            )}
           >
-            <PortfolioEntitlementsSection companies={data.companies} alisAdminIdCount={data.companies.filter((c) => c.alisAdminCompanyId).length} />
+            <PortfolioEntitlementsSection
+              companies={data.companies}
+              alisAdminIdCount={data.companies.filter((c) => c.alisAdminCompanyId).length}
+              onRollupChange={setEntitlementsRollup}
+            />
           </SectionCard>
 
           <SectionCard

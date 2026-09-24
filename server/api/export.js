@@ -211,11 +211,11 @@ router.get('/', async (req, res, next) => {
 // calls, renders exactly what the client already has on screen.
 router.post('/pdf', async (req, res, next) => {
   try {
-    const { companies, totals, kpi, generatedAt } = req.body || {};
+    const { companies, totals, kpi, generatedAt, entitlementsRollup } = req.body || {};
     if (!Array.isArray(companies) || !totals || !kpi) {
       return res.status(400).json({ error: 'Expected { companies, totals, kpi, generatedAt }' });
     }
-    const buffer = await renderDashboardPdf({ companies, totals, kpi, generatedAt: generatedAt || new Date().toISOString() });
+    const buffer = await renderDashboardPdf({ companies, totals, kpi, generatedAt: generatedAt || new Date().toISOString(), entitlementsRollup });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="ALIS-Product-Hub-Portfolio-Report-${new Date().toISOString().slice(0, 10)}.pdf"`);
     res.send(buffer);
