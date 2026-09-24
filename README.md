@@ -9,34 +9,58 @@ Read [`docs/CONTEXT.md`](docs/CONTEXT.md) first — it has the actual Slack-sour
 evidence for who this is for and what each view needs to do, and
 [`docs/FORK_PROMPT.md`](docs/FORK_PROMPT.md) for the original build brief.
 
-## Status (2026-09-21, updated twice same day)
+## Status (2026-09-24)
 
-Pivoted mid-build: instead of the six-view decision platform, v1 leads with the
-simplest thing that's actually valuable today — a live dashboard (with an Excel
-export alongside it), unscored, so Trisha's/BI's team and the integrations team can
-browse it in the browser or plug the export into whatever they already use. The six-view plan isn't
-gone, just shelved (see `docs/CONTEXT.md`) — the code and routes are still in the
-repo, just not the lead nav experience.
-
-Rebranded same day into **ALIS Product Hub** — real ALIS brand system (Tailwind
-config, colors, Lexend Exa, logo, the floating butterfly section-jump nav), ported
-directly from alis-hub's own design system rather than reinvented, so it reads as
-the same house rather than a one-off prototype.
+Rebranded as **ALIS Product Hub** — real ALIS brand system (Tailwind config, colors,
+Lexend Exa, logo, the floating butterfly section-jump nav), ported directly from
+alis-hub's own design system.
 
 | View | Status |
 |---|---|
-| **Dashboard** (`/`) — Accounts + Active Requests, browsable + Excel export | **Live — this is v1** |
-| Account Truth (Contracted / Enabled / Used, one account at a time) | Live but shelved from nav — reachable at `/accounts` |
-| Decision Log | Live but shelved from nav — reachable at `/decisions` |
-| Request Queue (scored, HubSpot + Jira) | Shelved — needs Jira/Atlassian connector access |
-| Pod Capacity / One-Pagers / Finance Reconciliation | Shelved — not started |
+| **Dashboard** (`/`) — portfolio-wide accounts, tickets, KPIs, browsable + Excel/PDF export | **Live — this is v1** |
+| **Account Truth** (`/accounts`) — Contracted / Enabled / Used, one account at a time | **Live, in nav** |
+| Decision Log (`/decisions`) | Live but shelved from nav — reachable directly |
+| Request Queue / Pod Capacity / One-Pagers / Finance Reconciliation | Shelved — not started, or blocked on Jira/Atlassian connector access |
 
-Both Data Export and Account Truth pull deal/line-item data that will come back
+### What the Dashboard actually covers today
+
+Not just "accounts + tickets" anymore — the Overview KPI row and section list cover:
+
+- **Portfolio ARR, Accounts, Communities, Capacity**, and **Enhancement Requests**
+  (headline figure = tickets staged Top 3 or Long-Term Projects — matches Team AM's
+  own definition on alis-hub, not a raw category count) with a Top 3 / Escalations
+  breakout.
+- **Accounts** — sortable, multiselect Tier + Priority filter pills, company search,
+  and an ALIS quick-links menu (🔗) next to every company name (Company Settings, App
+  Store, Reports, Imports, Print Center, All Communities, plus ALIS Admin links when
+  an Admin Company ID is on file) — no HubSpot link, since the product team doesn't
+  have HubSpot seats.
+- **Key Contacts**, **Onboarding**, **Portfolio Entitlements** (live ALIS admin
+  scrape, on-demand, streamed live via SSE — not part of the regular Refresh), and
+  **Portfolio KPIs** (ARR/Companies/Communities by Tier, each with a daily trend).
+- **Enhancement Requests, Top 3, Escalations, Tickets by Category/Module** — every
+  ticket table shares one component, so sorting, filtering, and search behave
+  identically everywhere.
+
+### Caching
+
+`GET /api/export` serves the last successful HubSpot pull instantly from a
+server-side cache (survives a server restart — see `server/db/export-cache.json`),
+not just a client-side one. Only the explicit **Refresh** button pays the ~15-25s
+live HubSpot pull; opening the app or navigating back to it is always instant.
+
+### Exports
+
+Both the **Excel** export (Overview sheet with KPI rollups, tier breakdowns with
+color-coded data bars, Top 10 by ARR, ALIS Portal links) and the **PDF** export
+(one-page branded portfolio report) reflect exactly what's on screen — no separate
+"export data" pipeline to drift out of sync.
+
+Both Data Export and Account Truth pull deal/line-item data that comes back
 **scope-blocked** until the shared HubSpot private app token gets the
 `crm.objects.line_items.read` and `crm.schemas.line_items.read` scopes added
 (alis-hub hit this same wall 2026-09-03). Deal-level info (name, ARR, close date)
-already works without it. The ticket side of Data Export (Active Requests) needs no
-extra scopes and is fully live today.
+already works without it. The ticket side of the Dashboard needs no extra scopes.
 
 ## Setup
 
@@ -46,7 +70,9 @@ npm run setup:env   # creates server/.env from .env.example — fill in HUBSPOT_
 npm run dev         # server on :3100, client on :5174
 ```
 
-Open [http://localhost:5174](http://localhost:5174).
+Open [http://localhost:5174](http://localhost:5174). First load does a real
+~15-25s HubSpot pull (nothing's cached yet); every load after that is instant,
+even across a server restart.
 
 ## Project structure
 
@@ -57,28 +83,39 @@ alis-product-ops/
 │   └── FORK_PROMPT.md   # original build brief
 ├── server/
 │   ├── index.js
-│   ├── db/database.js         # sql.js — currently just the decisions table
+│   ├── db/
+│   │   ├── database.js         # sql.js — decisions, ALIS admin ids, company hosts, entitlement snapshots
+│   │   └── export-cache.json   # last successful /api/export pull — survives a server restart
 │   ├── services/
-│   │   ├── hubspotClient.js   # generic bearer-auth-over-https + retry + associations, ported from alis-hub
-│   │   ├── hubspotAccounts.js # portfolio-wide company list (no owner scoping)
-│   │   ├── hubspotDeals.js    # deal + line-item pull for Contract Truth
-│   │   └── hubspotRequests.js # portfolio-wide active-ticket search + company join, for Dashboard
+│   │   ├── hubspotClient.js         # generic bearer-auth-over-https + retry + associations, ported from alis-hub
+│   │   ├── hubspotAccounts.js       # portfolio-wide company list (no owner scoping)
+│   │   ├── hubspotDeals.js          # deal + line-item pull for Contract Truth
+│   │   ├── hubspotRequests.js       # portfolio-wide active-ticket search + company join, for the Dashboard
+│   │   ├── alisEntitlements.js / alisCompanyDiscovery.js / portfolioEntitlementsJob.js  # Account Truth's live ALIS admin scrape
+│   │   └── dashboardPdf.js          # Playwright page.pdf() — the portfolio PDF export
 │   └── api/
-│       ├── accounts.js
+│       ├── accounts.js   # Account Truth's routes, incl. the Portfolio Entitlements SSE stream
+│       ├── broadcaster.js  # in-process SSE pub/sub, ported from alis-hub
 │       ├── decisions.js
-│       └── export.js          # GET /api/export — what Dashboard.jsx and the Excel export both read
+│       └── export.js     # GET /api/export (cached) + POST /pdf — what Dashboard.jsx and both exports read
 └── client/
     ├── public/                # ALIS brand assets (logo-horizontal.png, butterfly-icon.png)
     ├── tailwind.config.js     # same brand tokens as alis-hub's client/tailwind.config.js
     └── src/
-        ├── App.jsx            # branded top navbar + router
+        ├── App.jsx            # branded top navbar (logo links back to Dashboard) + router
+        ├── DataCache.jsx      # cross-page data cache — one shared fetch for Dashboard + Account Truth
         ├── pages/
-        │   ├── Dashboard.jsx  # v1 — the live browsable view + Export to Excel button
-        │   ├── AccountTruth.jsx / DecisionLog.jsx   # shelved, still live at their routes
+        │   ├── Dashboard.jsx        # v1 — portfolio-wide browsable view + Export to Excel/PDF
+        │   ├── AccountTruth.jsx     # live, in nav — Contracted/Enabled/Used per account
+        │   ├── DecisionLog.jsx      # shelved from nav, still live at /decisions
+        │   ├── NotFound.jsx         # catch-all for a bad/stale URL
         │   └── RequestQueue.jsx / PodCapacity.jsx / OnePagers.jsx / FinanceReconciliation.jsx  # shelved placeholders
-        ├── utils/dataExport.js       # ExcelJS workbook builder, same pattern as alis-hub's export utils
+        ├── utils/dataExport.js       # ExcelJS workbook builder (Overview sheet, Accounts, Requests, etc.)
         └── components/
-            ├── FloatingSectionNav.jsx  # the floating butterfly section-jump nav, ported verbatim from alis-hub
+            ├── FloatingSectionNav.jsx      # the floating butterfly section-jump nav, ported from alis-hub
+            ├── AlisQuickLinks.jsx          # the 🔗 quick-links menu next to every company name
+            ├── TierFilterPills.jsx         # multiselect Tier filter pills, shared by Accounts + Account Truth tables
+            ├── PortfolioEntitlementsSection.jsx  # live ALIS admin check, live-streamed log
             └── BackToTopButton.jsx
 ```
 

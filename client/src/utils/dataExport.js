@@ -28,6 +28,157 @@ function slugify(title) {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+/**
+ * One general client-accessible ALIS link per account for exports (Sep
+ * 2026, Aaron: "the ALIS links anchored by their subdomain would be great
+ * -- not the admin links though those are not accessible to clients").
+ * Deliberately just the bare subdomain root, not any of AlisQuickLinks'
+ * six more specific pages — a report row gets one clickable link, not a
+ * menu. `companyHost` can be a comma-separated multi-host string (a
+ * handful of accounts run more than one ALIS subdomain); only the first
+ * is used here, same "one representative host" simplification a static
+ * report needs (the on-screen AlisQuickLinks menu is where every host
+ * still gets its own full set of links).
+ */
+function alisPortalUrl(companyHost) {
+  const first = String(companyHost || '').split(',')[0].trim();
+  return first ? `https://${first}.alisonline.com` : null;
+}
+
+/** An ExcelJS hyperlink cell value, or plain '' when there's no host to link to — keeps every ALIS Portal column typed consistently instead of mixing strings and hyperlink objects. */
+function alisPortalCell(companyHost) {
+  const url = alisPortalUrl(companyHost);
+  return url ? { text: 'Open ALIS →', hyperlink: url } : '';
+}
+
+const TIER_ORDER = ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Unassigned'];
+const TIER_COLOR_ARGB = { 'Tier 1': 'FF16A34A', 'Tier 2': 'FF2563EB', 'Tier 3': 'FFEA580C', 'Tier 4': 'FFDC2626', Unassigned: 'FF737373' };
+
+/** A single-row visual bar via a data-bar conditional format, same idea as the on-screen tier charts' color coding — the closest ExcelJS gets to an embedded chart without a much heavier native-chart integration. */
+// Fixed 0-1 bounds, not 'min'/'max' auto-scaling — each bar is applied to a
+// single cell (one tier's own row) so its "share of total" value could
+// itself BE the min or max of its own one-cell range, which would either
+// crash ExcelJS's renderer or always fill 100%. Column C already holds a
+// 0-1 fraction (that tier's share of the portfolio total), so explicit
+// numeric bounds of 0 and 1 make the bar length mean what it should.
+function addDataBar(sheet, ref, argb) {
+  sheet.addConditionalFormatting({
+    ref,
+    rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'num', value: 1 }], color: { argb }, priority: 1 }],
+  });
+}
+
+/**
+ * "Thorough, robust, illustrative, engaging, graphical where appropriate,
+ * punchy — value delivered!!" (Sep 2026, Aaron) — the exports before this
+ * were a pure "just serve up the data" raw dump (V1's own doc comment):
+ * flat account/ticket rows with no summary, no visual weight, nothing a
+ * leadership audience could open and immediately understand. This Overview
+ * sheet leads the workbook with the same KPI/by-tier story the on-screen
+ * Dashboard tells — portfolio totals, ARR/Companies/Communities by tier
+ * with data-bar visualizations colored to match the app's own tier
+ * palette, and a Top 10 by ARR leaderboard — before the reader ever gets
+ * to the raw Accounts/Requests sheets.
+ */
+function addOverviewSheet(workbook, { companies, kpi, totals, generatedAt }) {
+  const sheet = workbook.addWorksheet('Overview', { views: [{ state: 'frozen', ySplit: 0 }] });
+  sheet.columns = [{ width: 26 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }];
+
+  sheet.mergeCells('A1:E1');
+  sheet.getCell('A1').value = 'ALIS Product Hub — Portfolio Overview';
+  sheet.getCell('A1').font = { size: 16, bold: true, color: { argb: 'FF1E293B' } };
+  sheet.mergeCells('A2:E2');
+  sheet.getCell('A2').value = `As of ${new Date(generatedAt).toLocaleString()}`;
+  sheet.getCell('A2').font = { italic: true, color: { argb: 'FF78716C' } };
+
+  let row = 4;
+  sheet.getCell(`A${row}`).value = 'Portfolio KPIs';
+  sheet.getCell(`A${row}`).font = { bold: true, size: 12 };
+  row += 1;
+  const kpiRows = [
+    ['Portfolio ARR', usd(totals.arrCents)],
+    ['Active Accounts', companies.length],
+    ['Communities', totals.communities],
+    ['Capacity (beds)', totals.capacityBeds],
+    ['Enhancement Requests (Top 3 + Long-Term)', totals.stagedEnhancements],
+    ['  — Top 3', totals.top3Enhancements],
+    ['  — Long-Term', totals.longTermEnhancements],
+    ['  — Other open (categorized, not yet staged)', totals.otherOpenEnhancements],
+    ['Tickets: Escalation (open)', totals.escalations],
+  ];
+  for (const [label, value] of kpiRows) {
+    sheet.getCell(`A${row}`).value = label;
+    sheet.getCell(`B${row}`).value = value;
+    sheet.getCell(`B${row}`).font = { bold: true };
+    if (label === 'Portfolio ARR') sheet.getCell(`B${row}`).numFmt = '$#,##0';
+    row += 1;
+  }
+
+  row += 1;
+  function byTierBlock(title, metricKey, formatFn, isCurrency) {
+    sheet.getCell(`A${row}`).value = title;
+    sheet.getCell(`A${row}`).font = { bold: true, size: 12 };
+    row += 1;
+    const headerRow = row;
+    sheet.getCell(`A${row}`).value = 'Tier';
+    sheet.getCell(`B${row}`).value = 'Value';
+    sheet.getCell(`C${row}`).value = 'Share';
+    sheet.getRow(row).font = { bold: true, color: { argb: 'FF78716C' } };
+    row += 1;
+    const startDataRow = row;
+    const values = TIER_ORDER.map((t) => kpi?.byTier?.[t]?.[metricKey] ?? 0);
+    const total = values.reduce((s, v) => s + v, 0);
+    TIER_ORDER.forEach((tier, i) => {
+      sheet.getCell(`A${row}`).value = tier;
+      sheet.getCell(`B${row}`).value = formatFn ? formatFn(values[i]) : values[i];
+      if (isCurrency) sheet.getCell(`B${row}`).numFmt = '$#,##0';
+      sheet.getCell(`C${row}`).value = total > 0 ? values[i] / total : 0;
+      sheet.getCell(`C${row}`).numFmt = '0.0%';
+      row += 1;
+    });
+    const endDataRow = row - 1;
+    sheet.getCell(`A${row}`).value = 'Total';
+    sheet.getCell(`A${row}`).font = { bold: true };
+    sheet.getCell(`B${row}`).value = formatFn ? formatFn(total) : total;
+    sheet.getCell(`B${row}`).font = { bold: true };
+    if (isCurrency) sheet.getCell(`B${row}`).numFmt = '$#,##0';
+    row += 2;
+    // One data-bar block per tier row's own color would need per-row conditional
+    // formats (ExcelJS doesn't support per-cell color in one dataBar rule) —
+    // applied per-tier-row below so each bar matches that tier's on-screen color.
+    for (let r = startDataRow; r <= endDataRow; r++) {
+      const tier = TIER_ORDER[r - startDataRow];
+      addDataBar(sheet, `C${r}:C${r}`, TIER_COLOR_ARGB[tier]);
+    }
+    void headerRow;
+  }
+
+  byTierBlock('ARR by Tier', 'arrCents', (v) => usd(v), true);
+  byTierBlock('Companies by Tier', 'companyCount');
+  byTierBlock('Communities by Tier', 'communityCount');
+
+  sheet.getCell(`A${row}`).value = 'Top 10 Accounts by ARR';
+  sheet.getCell(`A${row}`).font = { bold: true, size: 12 };
+  row += 1;
+  sheet.getCell(`A${row}`).value = 'Company';
+  sheet.getCell(`B${row}`).value = 'Tier';
+  sheet.getCell(`C${row}`).value = 'ARR';
+  sheet.getCell(`D${row}`).value = 'ALIS Portal';
+  sheet.getRow(row).font = { bold: true, color: { argb: 'FF78716C' } };
+  row += 1;
+  const top10 = [...companies].sort((a, b) => (b.arrCents || 0) - (a.arrCents || 0)).slice(0, 10);
+  for (const c of top10) {
+    sheet.getCell(`A${row}`).value = c.name;
+    sheet.getCell(`B${row}`).value = c.tier ?? '—';
+    sheet.getCell(`C${row}`).value = usd(c.arrCents);
+    sheet.getCell(`C${row}`).numFmt = '$#,##0';
+    sheet.getCell(`D${row}`).value = alisPortalCell(c.companyHost);
+    row += 1;
+  }
+
+  return sheet;
+}
+
 function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
   const sheet = workbook.addWorksheet(sheetName);
   sheet.columns = [
@@ -45,6 +196,7 @@ function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
     { header: 'Closed Enhancement Requests', key: 'closedEnhancementCount', width: 14 },
     { header: 'Last Activity', key: 'lastActivityDate', width: 14 },
     { header: 'Lifecycle Stage (raw)', key: 'lifecycleStage', width: 20 },
+    { header: 'ALIS Portal', key: 'alisPortal', width: 16 },
   ];
   for (const c of companies) {
     sheet.addRow({
@@ -62,6 +214,7 @@ function addAccountsSheet(workbook, companies, sheetName = 'Accounts') {
       closedEnhancementCount: c.closedEnhancementCount ?? 0,
       lastActivityDate: c.lastActivityDate ? c.lastActivityDate.slice(0, 10) : '',
       lifecycleStage: c.lifecycleStage,
+      alisPortal: alisPortalCell(c.companyHost),
     });
   }
   sheet.getRow(1).font = { bold: true };
@@ -88,6 +241,7 @@ function addRequestsSheet(workbook, requests, sheetName) {
     { header: 'Last Modified', key: 'lastModifiedAt', width: 12 },
     { header: 'Ticket ID', key: 'ticketId', width: 14 },
     { header: 'Link', key: 'url', width: 40 },
+    { header: 'ALIS Portal', key: 'alisPortal', width: 16 },
     { header: 'Pinned Note', key: 'pinnedNote', width: 60 },
   ];
   for (const r of requests) {
@@ -109,6 +263,7 @@ function addRequestsSheet(workbook, requests, sheetName) {
       lastModifiedAt: r.lastModifiedAt ? r.lastModifiedAt.slice(0, 10) : '',
       ticketId: r.ticketId,
       url: r.url,
+      alisPortal: alisPortalCell(r.companyHost),
       pinnedNote: r.pinnedNote,
     });
   }
@@ -117,9 +272,36 @@ function addRequestsSheet(workbook, requests, sheetName) {
 }
 
 /** The holistic export — both sheets, one file. `requests` is now the full open+closed ticket history (see server/api/export.js), so this sheet filters to what's still open to match its original "Active Requests" scope. */
-export async function exportDataToExcel({ companies, requests, generatedAt }) {
+/**
+ * Same active-account ticket scoping as Dashboard.jsx's own `accountTickets`
+ * (see its doc comment) — kept in sync by convention, not import, same as
+ * this codebase's other client-side by-tier color/order constants. Shared
+ * by the Excel Overview sheet and the PDF export (server/services/
+ * dashboardPdf.js) so the two can never drift apart on methodology — Aaron,
+ * Sep 2026, already got burned once by two dashboards computing "Enhancement
+ * Requests" two different ways.
+ */
+export function computeExportTotals(companies, requests) {
+  const activeIds = new Set(companies.map((c) => c.id));
+  const accountTickets = requests.filter((r) => r.companyId && activeIds.has(r.companyId));
+  const top3Enhancements = accountTickets.filter((r) => r.isOpen && r.isTopThree).length;
+  const longTermEnhancements = accountTickets.filter((r) => r.isOpen && r.isLongTermEnhancement && !r.isTopThree).length;
+  const stagedEnhancements = top3Enhancements + longTermEnhancements;
+  const otherOpenEnhancements = accountTickets.filter((r) => r.isOpen && r.isEnhancementRequest && !r.isTopThree && !r.isLongTermEnhancement).length;
+  const escalations = accountTickets.filter((r) => r.isOpen && r.isEscalation).length;
+  return {
+    arrCents: companies.reduce((s, c) => s + (c.arrCents || 0), 0),
+    communities: companies.reduce((s, c) => s + (c.communityCount || 0), 0),
+    capacityBeds: companies.reduce((s, c) => s + (c.totalCapacity || 0), 0),
+    top3Enhancements, longTermEnhancements, stagedEnhancements, otherOpenEnhancements, escalations,
+  };
+}
+
+export async function exportDataToExcel({ companies, requests, generatedAt, kpi }) {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date(generatedAt);
+  const totals = computeExportTotals(companies, requests);
+  addOverviewSheet(workbook, { companies, kpi, totals, generatedAt });
   addAccountsSheet(workbook, companies);
   addRequestsSheet(workbook, requests.filter((r) => r.isOpen), 'Active Requests');
   await download(workbook, `alis-product-data-${generatedAt.slice(0, 10)}.xlsx`);
@@ -160,6 +342,7 @@ function addProjectsSheet(workbook, projects, sheetName) {
     { header: 'Created', key: 'createdAt', width: 12 },
     { header: 'Deal ID', key: 'dealId', width: 14 },
     { header: 'Link', key: 'url', width: 40 },
+    { header: 'ALIS Portal', key: 'alisPortal', width: 16 },
     { header: 'Pinned Note', key: 'pinnedNote', width: 60 },
   ];
   for (const p of projects) {
@@ -177,6 +360,7 @@ function addProjectsSheet(workbook, projects, sheetName) {
       createdAt: p.createdAt ? p.createdAt.slice(0, 10) : '',
       dealId: p.dealId,
       url: p.url,
+      alisPortal: alisPortalCell(p.companyHost),
       pinnedNote: p.pinnedNote,
     });
   }
@@ -203,6 +387,7 @@ function addKeyContactsSheet(workbook, rows) {
     { header: 'Email', key: 'email', width: 28 },
     { header: 'Phone', key: 'phone', width: 16 },
     { header: 'Link', key: 'url', width: 40 },
+    { header: 'ALIS Portal', key: 'alisPortal', width: 16 },
   ];
   for (const r of rows) {
     sheet.addRow({
@@ -214,6 +399,7 @@ function addKeyContactsSheet(workbook, rows) {
       email: r.email,
       phone: r.phone,
       url: r.url,
+      alisPortal: alisPortalCell(r.companyHost),
     });
   }
   sheet.getRow(1).font = { bold: true };
@@ -226,4 +412,37 @@ export async function exportKeyContactsToExcel(rows, generatedAt) {
   workbook.created = new Date(generatedAt);
   addKeyContactsSheet(workbook, rows);
   await download(workbook, `alis-product-hub-key-contacts-${generatedAt.slice(0, 10)}.xlsx`);
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * The whole-portfolio PDF report (server/services/dashboardPdf.js) — same
+ * "client already has the data, server just renders it" convention as
+ * accountTruthExport.js's exportAccountTruthToPdf. `totals`/`kpi` travel in
+ * the request body rather than being recomputed server-side, via the same
+ * computeExportTotals() the Excel Overview sheet uses, so the two exports
+ * can never tell a different story about the same numbers.
+ */
+export async function exportDashboardToPdf({ companies, requests, kpi, generatedAt }) {
+  const totals = computeExportTotals(companies, requests);
+  const res = await fetch('/api/export/pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ companies, totals, kpi, generatedAt }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PDF export failed (${res.status})`);
+  }
+  downloadBlob(await res.blob(), `ALIS-Product-Hub-Portfolio-Report-${generatedAt.slice(0, 10)}.pdf`);
 }

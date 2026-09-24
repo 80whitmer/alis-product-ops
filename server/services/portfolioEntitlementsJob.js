@@ -10,6 +10,13 @@
  */
 const { getLiveEntitlementsBulk } = require('./alisEntitlements');
 const { replaceEntitlementSnapshot, listEntitlementSnapshots, countEntitlementSnapshotCompanies } = require('../db/database');
+const { broadcast } = require('../api/broadcaster');
+
+// Fixed channel id, not a per-run jobId — only one portfolio entitlement
+// check can ever be running at a time (see the state.status === 'running'
+// guard below), so there's nothing to disambiguate between runs. Same
+// convention as alis-hub's own copy of this file.
+const STREAM_CHANNEL = 'portfolio-entitlements';
 
 let state = { status: 'idle', total: 0, processed: 0, currentCompany: null, startedAt: null, finishedAt: null, errors: [] };
 
@@ -17,27 +24,53 @@ function getStatus() {
   return { ...state, snapshotCompanyCount: countEntitlementSnapshotCompanies() };
 }
 
-/** Starts the job if one isn't already running. Fire-and-forget — progress is polled via getStatus(). Returns false if a run was already in progress. */
+/**
+ * Starts the job if one isn't already running. Fire-and-forget — progress
+ * is broadcast live over SSE (server/api/accounts.js's /portfolio-
+ * entitlements/stream route) as each account finishes, instead of the
+ * client polling getStatus() on a timer — ported from alis-hub's own copy
+ * of this file (Sep 2026, Aaron: port the ALIS Photo Migrator side
+ * project's live-log idea to product-ops too). A late subscriber (page
+ * opened mid-run, or a reload) still gets getStatus()'s point-in-time
+ * snapshot on connect — see the /stream route — it just won't see log
+ * lines from before it connected.
+ */
 function startPortfolioEntitlementsCheck(accounts) {
   if (state.status === 'running') return false;
   state = { status: 'running', total: accounts.length, processed: 0, currentCompany: null, startedAt: new Date().toISOString(), finishedAt: null, errors: [] };
+  broadcast(STREAM_CHANNEL, 'log', { msg: `Starting portfolio entitlement check — ${accounts.length} account(s)...` });
 
   getLiveEntitlementsBulk(accounts, {
     onProgress: ({ index, total, companyName, status, error }) => {
       state.currentCompany = companyName;
       state.total = total;
-      if (status === 'done') state.processed = index + 1;
+      if (status === 'done') {
+        state.processed = index + 1;
+        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName}` });
+      }
       if (status === 'error') {
         state.processed = index + 1;
         state.errors.push({ companyName, error });
+        broadcast(STREAM_CHANNEL, 'log', { msg: `[${index + 1}/${total}] ${companyName} — ERROR: ${error}`, level: 'error' });
       }
     },
     onSnapshot: async (hubspotCompanyId, companyName, flags) => {
       replaceEntitlementSnapshot(hubspotCompanyId, companyName, flags);
     },
   })
-    .then(() => { state.status = 'done'; state.finishedAt = new Date().toISOString(); })
-    .catch((err) => { state.status = 'error'; state.finishedAt = new Date().toISOString(); state.errors.push({ companyName: null, error: err.message }); });
+    .then(() => {
+      state.status = 'done';
+      state.finishedAt = new Date().toISOString();
+      broadcast(STREAM_CHANNEL, 'log', { msg: `Done. ${state.processed} of ${state.total} account(s) checked, ${state.errors.length} error(s).` });
+      broadcast(STREAM_CHANNEL, 'complete', getStatus());
+    })
+    .catch((err) => {
+      state.status = 'error';
+      state.finishedAt = new Date().toISOString();
+      state.errors.push({ companyName: null, error: err.message });
+      broadcast(STREAM_CHANNEL, 'log', { msg: `FATAL ERROR: ${err.message}`, level: 'error' });
+      broadcast(STREAM_CHANNEL, 'complete', getStatus());
+    });
 
   return true;
 }

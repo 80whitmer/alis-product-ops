@@ -5,6 +5,7 @@ const { getKeyContactsForCompany } = require('../services/hubspotContacts');
 const { getLiveEntitlements } = require('../services/alisEntitlements');
 const { discoverAlisAdminIds } = require('../services/alisCompanyDiscovery');
 const { startPortfolioEntitlementsCheck, getStatus: getPortfolioEntitlementsStatus, getPortfolioEntitlementRollup } = require('../services/portfolioEntitlementsJob');
+const { subscribe, unsubscribe } = require('./broadcaster');
 const { renderAccountTruthPdf } = require('../services/accountTruthPdf');
 const {
   getAlisAdminId, setAlisAdminId, bulkSetAlisAdminIds, deleteAlisAdminId,
@@ -197,6 +198,32 @@ router.post('/portfolio-entitlements/run', (req, res) => {
 // memory).
 router.get('/portfolio-entitlements/status', (req, res) => {
   res.json({ job: getPortfolioEntitlementsStatus(), rollup: getPortfolioEntitlementRollup() });
+});
+
+// GET /api/accounts/portfolio-entitlements/stream — live log of a running
+// check (Sep 2026, Aaron: ported from alis-hub, which itself ported the
+// idea from the ALIS Photo Migrator side project's own live-scrolling-log
+// UX). Fixed channel name, not a per-run jobId — portfolioEntitlementsJob.js
+// only ever has one run active at a time. Sends the current point-in-time
+// job snapshot immediately on connect so a client opening mid-run (or
+// reloading) hydrates its progress bar/counts right away; past individual
+// log lines aren't replayable, only what's broadcast from this point on.
+router.get('/portfolio-entitlements/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const job = getPortfolioEntitlementsStatus();
+  res.write(`event: snapshot\ndata: ${JSON.stringify(job)}\n\n`);
+
+  if (job.status !== 'running') {
+    res.end();
+    return;
+  }
+
+  subscribe('portfolio-entitlements', res);
+  req.on('close', () => unsubscribe('portfolio-entitlements', res));
 });
 
 // POST /api/accounts/:id/export-pdf — the full Account Truth report (Products,

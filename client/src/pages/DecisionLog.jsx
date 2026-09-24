@@ -210,7 +210,7 @@ export default function DecisionLog() {
               <p style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>{thisQuarterCount}</p>
             </div>
           </div>
-          <button className="secondary" onClick={handleExport} disabled={exporting || decisions.length === 0}>
+          <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={exporting || decisions.length === 0}>
             {exporting ? 'Building file…' : '⬇ Export to Excel'}
           </button>
         </div>
@@ -226,7 +226,7 @@ export default function DecisionLog() {
           <div key={d.id} style={{ borderBottom: '1px solid var(--line)', padding: '12px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <strong>{d.subject}</strong>
-              <button className="secondary" onClick={() => handleDelete(d.id)}>Remove</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(d.id)}>Remove</button>
             </div>
             <div style={{ fontSize: 13.5 }}>{d.outcome}</div>
             {d.evidence && <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 4 }}>{d.evidence}</div>}

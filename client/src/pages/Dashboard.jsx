@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getKeyContacts } from '../api.js';
 import { useDataCache } from '../DataCache.jsx';
-import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel, exportKeyContactsToExcel } from '../utils/dataExport.js';
+import { exportDataToExcel, exportAccountsToExcel, exportRequestsToExcel, exportProjectsToExcel, exportKeyContactsToExcel, exportDashboardToPdf } from '../utils/dataExport.js';
 import FloatingSectionNav from '../components/FloatingSectionNav.jsx';
 import BackToTopButton from '../components/BackToTopButton.jsx';
 import { EscalationCharts, EnhancementCharts } from '../components/TicketCharts.jsx';
@@ -12,6 +12,7 @@ import KeyContactsSection from '../components/KeyContactsSection.jsx';
 import PortfolioEntitlementsSection from '../components/PortfolioEntitlementsSection.jsx';
 import { CategoryMixSection, ModuleSection } from '../components/CategoryCharts.jsx';
 import PinnedNoteBody from '../components/PinnedNote.jsx';
+import AlisQuickLinks from '../components/AlisQuickLinks.jsx';
 
 /** Same title -> DOM-id convention as alis-hub's dashboards (kept in sync manually, not shared — see FloatingSectionNav's doc comment). */
 function slugify(title) {
@@ -221,7 +222,10 @@ function AccountRow({ a, expanded, onToggle, contacts, loading, error }) {
   return (
     <>
       <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
-        <td>{a.name}</td>
+        <td>
+          {a.name}
+          <AlisQuickLinks companyHost={a.companyHost} alisAdminCompanyId={a.alisAdminCompanyId} className="ml-1.5 align-middle" />
+        </td>
         <td>{a.accountManagerName || '—'}</td>
         <td>{a.tier ?? '—'}</td>
         <td>{usd(a.arrCents)}</td>
@@ -278,7 +282,10 @@ function RequestRow({ r, expanded, onToggle }) {
   return (
     <>
       <tr onClick={onToggle} className="cursor-pointer hover:bg-neutral-50">
-        <td>{r.companyName || '—'}</td>
+        <td>
+          {r.companyName || '—'}
+          <AlisQuickLinks companyHost={r.companyHost} alisAdminCompanyId={r.alisAdminCompanyId} className="ml-1.5 align-middle" />
+        </td>
         <td>{r.accountManagerName || '—'}</td>
         <td>{r.category || '—'}</td>
         <td>{r.tier ?? '—'}</td>
@@ -316,18 +323,104 @@ function RequestRow({ r, expanded, onToggle }) {
 }
 
 /**
+ * App-wide table standard (Sep 2026, Aaron: "would love this to be the
+ * standard around the apps — columns can sort via their column title and
+ * where appropriate there should be filter pills that can be multiselected
+ * to filter for specific combos of data"). `sortKey` is a data field name
+ * (or null for columns that don't make sense to sort, like the expand
+ * arrow); clicking cycles asc → desc → off. Active column gets an arrow.
+ */
+function SortableTh({ label, sortKey, sort, onSort, className = '' }) {
+  if (!sortKey) return <th className={className}></th>;
+  const active = sort.key === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`cursor-pointer select-none hover:text-neutral-700 ${className}`}
+      title={`Sort by ${label}`}
+    >
+      {label}{active && <span className="ml-1">{sort.direction === 'asc' ? '▲' : '▼'}</span>}
+    </th>
+  );
+}
+
+/**
+ * Multiselect filter pills (Sep 2026, Aaron, same request) — unlike the
+ * older single-select Tier pill row (click one to isolate it, click again
+ * to clear), any number of pills can be active at once: "Tier 1 + Tier 2"
+ * or "High + Urgent priority" narrows to the union of whichever are
+ * toggled on, empty selection means no filter. `counts` are computed
+ * against the search-filtered-but-not-yet-pill-filtered set, same
+ * "shows what you'd actually get" convention as the old single-select
+ * pills, so a pill's own count updates as other pills/search narrow the
+ * list, but never against itself.
+ */
+function MultiSelectPills({ options, selected, onToggle, onClear }) {
+  const visible = options.filter((o) => o.count > 0);
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3">
+      {visible.map((o) => {
+        const active = selected.has(o.value);
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onToggle(o.value)}
+            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              active ? 'bg-accent-500 text-white border-accent-500' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            {o.label} ({o.count})
+          </button>
+        );
+      })}
+      {selected.size > 0 && (
+        <button type="button" onClick={onClear} className="text-xs text-neutral-400 hover:text-neutral-600 underline">
+          Clear filter
+        </button>
+      )}
+    </div>
+  );
+}
+
+function compareValues(av, bv, dir) {
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (typeof av === 'string') return av.localeCompare(bv) * dir;
+  return (av - bv) * dir;
+}
+
+/**
  * Shared table for every request list on this page — Top 3 Enhancements,
  * Escalations, and Active Requests all render through this so search,
- * columns, and the expand behavior can't drift between sections. `search`
- * (when `showSearch`) matches company, account manager, issue type
- * (category), and subject — the four things you'd actually go looking for
- * a ticket by.
+ * sort, filters, and the expand behavior can't drift between sections.
+ * `search` (when `showSearch`) matches company, account manager, issue
+ * type (category), and subject — the four things you'd actually go
+ * looking for a ticket by. Tier and Priority get multiselect pills — both
+ * are small fixed sets, unlike Stage/Company which vary too much per
+ * pipeline/account to make good pill candidates.
  */
 function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) {
   const [expandedId, setExpandedId] = useState(null);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState({ key: null, direction: 'asc' });
+  const [tierFilter, setTierFilter] = useState(() => new Set());
+  const [priorityFilter, setPriorityFilter] = useState(() => new Set());
 
-  const filtered = useMemo(() => {
+  function toggleSort(key) {
+    setSort((prev) => (prev.key !== key ? { key, direction: 'asc' } : { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }));
+  }
+  function toggleInSet(setter, value) {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value); else next.add(value);
+      return next;
+    });
+  }
+
+  const searchFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return requests;
     return requests.filter((r) =>
@@ -339,6 +432,41 @@ function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) 
       r.pinnedNote?.toLowerCase().includes(q)
     );
   }, [requests, search]);
+
+  const tierOptions = useMemo(() => {
+    const byTier = new Map();
+    for (const r of searchFiltered) {
+      const key = (r.tier == null || r.tier === 0) ? 'Unassigned' : `Tier ${r.tier}`;
+      byTier.set(key, (byTier.get(key) || 0) + 1);
+    }
+    return ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Unassigned'].map((t) => ({ value: t, label: t, count: byTier.get(t) || 0 }));
+  }, [searchFiltered]);
+
+  const priorityOptions = useMemo(() => {
+    const byPriority = new Map();
+    for (const r of searchFiltered) {
+      const key = r.priority || 'None';
+      byPriority.set(key, (byPriority.get(key) || 0) + 1);
+    }
+    return [...byPriority.entries()].map(([value, count]) => ({ value, label: value, count })).sort((a, b) => b.count - a.count);
+  }, [searchFiltered]);
+
+  const pillFiltered = useMemo(() => {
+    return searchFiltered.filter((r) => {
+      if (tierFilter.size > 0) {
+        const key = (r.tier == null || r.tier === 0) ? 'Unassigned' : `Tier ${r.tier}`;
+        if (!tierFilter.has(key)) return false;
+      }
+      if (priorityFilter.size > 0 && !priorityFilter.has(r.priority || 'None')) return false;
+      return true;
+    });
+  }, [searchFiltered, tierFilter, priorityFilter]);
+
+  const filtered = useMemo(() => {
+    if (!sort.key) return pillFiltered;
+    const dir = sort.direction === 'asc' ? 1 : -1;
+    return [...pillFiltered].sort((a, b) => compareValues(a[sort.key], b[sort.key], dir));
+  }, [pillFiltered, sort]);
 
   if (requests.length === 0) {
     return <p className="text-sm text-neutral-500 py-4">{emptyLabel}</p>;
@@ -354,15 +482,35 @@ function RequestsTable({ requests, emptyLabel, showSearch = true, limit = 50 }) 
           className="w-full mb-4"
         />
       )}
+      <MultiSelectPills
+        options={tierOptions}
+        selected={tierFilter}
+        onToggle={(v) => toggleInSet(setTierFilter, v)}
+        onClear={() => setTierFilter(new Set())}
+      />
+      <MultiSelectPills
+        options={priorityOptions}
+        selected={priorityFilter}
+        onToggle={(v) => toggleInSet(setPriorityFilter, v)}
+        onClear={() => setPriorityFilter(new Set())}
+      />
       {filtered.length === 0 ? (
-        <p className="text-sm text-neutral-500 py-4">No requests match that search.</p>
+        <p className="text-sm text-neutral-500 py-4">No requests match that search/filter.</p>
       ) : (
         <div className="overflow-x-auto">
           <table>
             <thead>
               <tr>
-                <th>Company</th><th>Account Manager</th><th>Issue Type</th><th>Tier</th><th>ARR</th>
-                <th>Subject</th><th>Stage</th><th>Priority</th><th>Age</th><th></th>
+                <SortableTh label="Company" sortKey="companyName" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Account Manager" sortKey="accountManagerName" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Issue Type" sortKey="category" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Tier" sortKey="tier" sort={sort} onSort={toggleSort} />
+                <SortableTh label="ARR" sortKey="arrCents" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Subject" sortKey="subject" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Stage" sortKey="stage" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Priority" sortKey="priority" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Age" sortKey="ageDays" sort={sort} onSort={toggleSort} />
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -390,7 +538,7 @@ export default function Dashboard() {
   const { data, loading, error, kpiHistory } = dashboard;
   const [exporting, setExporting] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
-  const [accountTierFilter, setAccountTierFilter] = useState(null);
+  const [accountTierFilter, setAccountTierFilter] = useState(() => new Set());
   const [accountSort, setAccountSort] = useState({ key: null, dir: 'asc' });
   const [expandedAccountId, setExpandedAccountId] = useState(null);
   const [contactsByAccount, setContactsByAccount] = useState({});
@@ -437,6 +585,21 @@ export default function Dashboard() {
     }
   }
 
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState('');
+  async function handleExportPdf() {
+    if (!data) return;
+    setExportingPdf(true);
+    setPdfExportError('');
+    try {
+      await exportDashboardToPdf(data);
+    } catch (err) {
+      setPdfExportError(err.message);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   const searchFilteredAccounts = useMemo(() => {
     if (!data) return [];
     const q = accountSearch.trim().toLowerCase();
@@ -456,22 +619,30 @@ export default function Dashboard() {
     return [...filteredAccounts].sort((a, b) => compareAccounts(a, b, accountSort.key, accountSort.dir));
   }, [filteredAccounts, accountSort]);
 
-  const top3Enhancements = useMemo(
-    () => (data ? data.requests.filter((r) => r.isOpen && r.isTopThree) : []),
-    [data]
-  );
-  const closedTop3Enhancements = useMemo(
-    () => (data ? data.requests.filter((r) => !r.isOpen && r.isTopThree) : []),
-    [data]
-  );
-  const escalations = useMemo(
-    () => (data ? data.requests.filter((r) => r.isOpen && r.isEscalation) : []),
-    [data]
-  );
-  const closedEscalations = useMemo(
-    () => (data ? data.requests.filter((r) => !r.isOpen && r.isEscalation) : []),
-    [data]
-  );
+  // Scoped to tickets on active Home Office accounts, same as alis-hub's
+  // Tickets by Category (which pulls tickets per Home Office) — excludes
+  // unassociated tickets, ones linked only to a community record, and
+  // inactive (Tier 0/blank, no ARR) accounts. Every other ticket bucket
+  // below (Enhancement Requests, Top 3, Escalations) now derives from this
+  // instead of raw `data.requests` (Sep 2026, Aaron: "why does the AM
+  // dashboard capture 157 Enhancement requests AND the Product hub
+  // Dashboard has 560" — `data.requests` covers every Home Office
+  // export.js pulled tickets for, including the ~228 inactive ones this
+  // dashboard's own Accounts table already hides; those buckets were
+  // counting inactive-account tickets that alis-hub's Team AM never
+  // counted in the first place, not double-counting or a scope mismatch).
+  const accountTickets = useMemo(() => {
+    if (!data) return [];
+    const activeIds = new Set(data.companies.map((c) => c.id));
+    return data.requests.filter((r) => r.companyId && activeIds.has(r.companyId));
+  }, [data]);
+  const openTickets = useMemo(() => accountTickets.filter((r) => r.isOpen), [accountTickets]);
+  const closedTickets = useMemo(() => accountTickets.filter((r) => !r.isOpen), [accountTickets]);
+
+  const top3Enhancements = useMemo(() => accountTickets.filter((r) => r.isOpen && r.isTopThree), [accountTickets]);
+  const closedTop3Enhancements = useMemo(() => accountTickets.filter((r) => !r.isOpen && r.isTopThree), [accountTickets]);
+  const escalations = useMemo(() => accountTickets.filter((r) => r.isOpen && r.isEscalation), [accountTickets]);
+  const closedEscalations = useMemo(() => accountTickets.filter((r) => !r.isOpen && r.isEscalation), [accountTickets]);
 
   const totalArrCents = useMemo(
     () => (data ? data.companies.reduce((sum, c) => sum + (c.arrCents || 0), 0) : 0),
@@ -485,25 +656,24 @@ export default function Dashboard() {
     () => (data ? data.companies.reduce((sum, c) => sum + (c.totalCapacity || 0), 0) : 0),
     [data]
   );
-  const enhancementRequests = useMemo(
-    () => (data ? data.requests.filter((r) => r.isOpen && r.isEnhancementRequest) : []),
-    [data]
+  const enhancementRequests = useMemo(() => accountTickets.filter((r) => r.isOpen && r.isEnhancementRequest), [accountTickets]);
+  // alis-hub's own headline "Enhancement Requests" KPI number is narrower
+  // than the full category-based `enhancementRequests` bucket above — only
+  // tickets actually staged Top 3 or Long-Term Projects count toward it
+  // (confirmed live against Team AM, Sep 2026: its "157" tile = exactly
+  // top3Enhancements.length + longTermEnhancements.length, with every other
+  // open Enhancement-categorized-but-unstaged ticket called out separately
+  // as "N other open" rather than folded into the headline). The full
+  // `enhancementRequests` list/section below is unchanged and still shows
+  // everything category-matched — only this Overview stat tile is scoped
+  // down to match what Team AM's own headline number actually counts.
+  const longTermEnhancements = useMemo(() => accountTickets.filter((r) => r.isOpen && r.isLongTermEnhancement && !r.isTopThree), [accountTickets]);
+  const stagedEnhancements = useMemo(() => accountTickets.filter((r) => r.isOpen && (r.isTopThree || r.isLongTermEnhancement)), [accountTickets]);
+  const closedStagedEnhancements = useMemo(() => accountTickets.filter((r) => !r.isOpen && (r.isTopThree || r.isLongTermEnhancement)), [accountTickets]);
+  const otherOpenEnhancements = useMemo(
+    () => enhancementRequests.filter((r) => !r.isTopThree && !r.isLongTermEnhancement),
+    [enhancementRequests]
   );
-  const closedEnhancementRequests = useMemo(
-    () => (data ? data.requests.filter((r) => !r.isOpen && r.isEnhancementRequest) : []),
-    [data]
-  );
-  // Scoped to tickets on active Home Office accounts, same as alis-hub's
-  // Tickets by Category (which pulls tickets per Home Office) — excludes
-  // unassociated tickets, ones linked only to a community record, and
-  // inactive accounts.
-  const accountTickets = useMemo(() => {
-    if (!data) return [];
-    const activeIds = new Set(data.companies.map((c) => c.id));
-    return data.requests.filter((r) => r.companyId && activeIds.has(r.companyId));
-  }, [data]);
-  const openTickets = useMemo(() => accountTickets.filter((r) => r.isOpen), [accountTickets]);
-  const closedTickets = useMemo(() => accountTickets.filter((r) => !r.isOpen), [accountTickets]);
   const openEscalationsMissingModule = useMemo(() => escalations.filter((r) => !r.module), [escalations]);
   const unassignedCompanies = useMemo(
     () => (data ? data.companies.filter((c) => c.tier == null || c.tier === 0) : []),
@@ -513,9 +683,9 @@ export default function Dashboard() {
     <>
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
-          <h1 className="text-3xl font-bold text-primary-900">Realtime Client Data</h1>
+          <h1 className="text-3xl font-bold text-primary-900">Dashboard</h1>
           <p className="text-sm text-neutral-500 mt-1 max-w-xl">
-            Live from HubSpot, no scoring applied. Browse it here, or export it to plug into
+            Every client, straight from HubSpot, no scoring applied — cached and ready the moment you open this. Browse it here, or export it to plug into
             whatever you're already using — the #bi-priority sheet, DOMO, a pivot table.
           </p>
         </div>
@@ -527,17 +697,35 @@ export default function Dashboard() {
             <button className="btn-accent" onClick={handleExport} disabled={!data || exporting}>
               {exporting ? 'Building file…' : 'Export to Excel'}
             </button>
+            <button className="btn-secondary" onClick={handleExportPdf} disabled={!data || exportingPdf}>
+              {exportingPdf ? 'Building PDF…' : 'Export to PDF'}
+            </button>
           </div>
           {dashboard.lastRefreshedAt && (
             <p className="text-xs text-neutral-400">Last refreshed {formatTimestamp(dashboard.lastRefreshedAt)}</p>
           )}
+          {pdfExportError && <p className="text-xs text-red-600 max-w-xs text-right">{pdfExportError}</p>}
         </div>
       </div>
 
-      {error && <div className="notice danger">{error}</div>}
+      {error && (
+        <div className="notice danger flex items-center justify-between gap-4">
+          <span>{error}</span>
+          {!data && (
+            <button className="btn-secondary shrink-0" onClick={refreshDashboard}>Retry</button>
+          )}
+        </div>
+      )}
 
       {loading && !data && (
         <div className="card text-center text-neutral-500 py-16">Pulling live data from HubSpot…</div>
+      )}
+
+      {!loading && !error && !data && (
+        <div className="card text-center text-neutral-500 py-16">
+          <p className="mb-3">Nothing loaded yet.</p>
+          <button className="btn-secondary" onClick={refreshDashboard}>Load data</button>
+        </div>
       )}
 
       {data && (
@@ -548,7 +736,14 @@ export default function Dashboard() {
               <StatTile label="Accounts" value={data.companies.length} jumpTo="Accounts" tooltip="Every Home Office account in HubSpot" />
               <StatTile label="Communities" value={totalCommunities.toLocaleString()} jumpTo="Accounts" tooltip="Sum of each account's child-company count in HubSpot — one per physical community/location" />
               <StatTile label="Capacity (beds)" value={totalCapacityBeds.toLocaleString()} jumpTo="Accounts" tooltip="Sum of HubSpot's company_total_capacity field — hand-maintained per account, not a live ALIS pull, so treat as directional" />
-              <StatTile label="Enhancement Requests" value={enhancementRequests.length} sub="by category" accent jumpTo="Enhancement Requests" tooltip="Every open ticket categorized Enhancement / Feature Request, or titled as an enhancement" />
+              <StatTile
+                label="Enhancement Requests"
+                value={stagedEnhancements.length}
+                sub={`${top3Enhancements.length} Top 3 · ${longTermEnhancements.length} Long-Term · ${otherOpenEnhancements.length} other open`}
+                accent
+                jumpTo="Enhancement Requests"
+                tooltip="Tickets staged Top 3 or Long-Term Projects — same headline figure Team AM/Account Health count. The Enhancement Requests section below also lists every other open ticket categorized Enhancement / Feature Request that hasn't been staged into either yet."
+              />
               <StatTile label="Enhancement Requests: Top 3" value={top3Enhancements.length} accent jumpTo="Enhancement Requests: Top 3" tooltip="Tickets an account manager has explicitly staged as one of their account's top 3 priorities" />
               <StatTile label="Tickets: Escalation" value={escalations.length} accent jumpTo="Tickets: Escalation" tooltip="Tickets categorized ALIS Escalation ('ALIS Bug' in HubSpot's raw category_2_0 field)" />
             </div>
@@ -624,18 +819,13 @@ export default function Dashboard() {
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={usd}
             />
             <KpiTierSection
-              title="Companies by Tier" metricKey="companyCount" name="Companies"
-              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
-            />
-            <KpiTierSection
-              title="Communities by Tier" metricKey="communityCount" name="Communities"
-              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
-            />
-            <ArrBandSection current={data.kpi} arrBandHistory={kpiHistory.arrBand} />
-            <KpiTierSection
-              title={`ARR Added (${new Date().getFullYear()}) by Tier`} metricKey="arrAddedThisYearCents" name="ARR Added"
+              title={`New ARR (${new Date().getFullYear()}) by Tier`} metricKey="arrAddedThisYearCents" name="ARR Added"
               description="Sum of ARR value across deals closed-won this calendar year, by tier."
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={usd}
+            />
+            <KpiTierSection
+              title="Companies by Tier" metricKey="companyCount" name="Companies"
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
             <KpiTierSection
               title={`Companies Contributing ARR (${new Date().getFullYear()}) by Tier`} metricKey="companiesContributingArrThisYear" name="Companies"
@@ -643,10 +833,15 @@ export default function Dashboard() {
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
             <KpiTierSection
+              title="Communities by Tier" metricKey="communityCount" name="Communities"
+              current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
+            />
+            <KpiTierSection
               title={`Communities Contributing ARR (${new Date().getFullYear()}) by Tier`} metricKey="communitiesContributingArrThisYear" name="Communities"
               description="Approximation: current community count of the accounts above — deals attach to the Home Office, not the individual community, so which communities a deal covered isn't tracked."
               current={data.kpi} tierHistory={kpiHistory.tier} formatValue={formatCount}
             />
+            <ArrBandSection current={data.kpi} arrBandHistory={kpiHistory.arrBand} />
             <AverageMetricSection
               title="Average ARR per Company by Tier" numeratorKey="arrCents" denominatorKey="companyCount"
               buckets={data.kpi.byTier} history={kpiHistory.tier} scopeKeys={TIER_ORDER} colorFor={(t) => TIER_COLOR[t]} formatValue={usd}
@@ -735,12 +930,12 @@ export default function Dashboard() {
 
           <SectionCard
             title="Enhancement Requests"
-            description="Every ticket categorized as an Enhancement / Feature Request (or titled as one), portfolio-wide — broader than Enhancement Requests: Top 3 above."
+            description={`Tickets staged Top 3 or Long-Term Projects, portfolio-wide — the same ${stagedEnhancements.length} figure as the Enhancement Requests KPI tile above.`}
             defaultExpanded={false}
-            action={<SectionExportButton onExport={() => exportRequestsToExcel(enhancementRequests, 'Enhancement Requests', data.generatedAt)} />}
+            action={<SectionExportButton onExport={() => exportRequestsToExcel(stagedEnhancements, 'Enhancement Requests', data.generatedAt)} />}
           >
-            <EnhancementCharts openItems={enhancementRequests} closedItems={closedEnhancementRequests} />
-            <RequestsTable requests={enhancementRequests} emptyLabel="No enhancement requests right now." />
+            <EnhancementCharts openItems={stagedEnhancements} closedItems={closedStagedEnhancements} />
+            <RequestsTable requests={stagedEnhancements} emptyLabel="No staged enhancement requests right now." />
           </SectionCard>
 
           <SectionCard

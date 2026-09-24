@@ -10,7 +10,7 @@ async function request(path, options) {
   return res.status === 204 ? null : res.json();
 }
 
-export const getExportData = () => request('/export');
+export const getExportData = (forceRefresh = false) => request(`/export${forceRefresh ? '?refresh=true' : ''}`);
 export const getContractTruth = (id) => request(`/accounts/${id}/contract-truth`);
 export const getKeyContacts = (id) => request(`/accounts/${id}/contacts`);
 export const getKpiHistory = () => request('/kpi/history');

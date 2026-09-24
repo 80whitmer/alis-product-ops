@@ -20,12 +20,25 @@ function formatTimestamp(iso) {
   return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function SortableHeader({ label, column, sort, onSort, title }) {
+  const active = sort.column === column;
+  return (
+    <th
+      onClick={() => onSort(column)}
+      title={title}
+      style={{ cursor: 'pointer', userSelect: 'none' }}
+    >
+      {label}{active && <span style={{ marginLeft: 4 }}>{sort.direction === 'asc' ? '▲' : '▼'}</span>}
+    </th>
+  );
+}
+
 export default function AccountTruth() {
   const { dashboard, refreshDashboard, ensureDashboardLoaded, patchCompany, markUpdated } = useDataCache();
   const accounts = dashboard.data?.companies || [];
   const { loading: accountsLoading, error: loadError, lastRefreshedAt, alisAdminIdsUpdatedAt, companyHostsUpdatedAt } = dashboard;
   const [search, setSearch] = useState('');
-  const [tierFilter, setTierFilter] = useState(null);
+  const [tierFilter, setTierFilter] = useState(() => new Set());
   const [selected, setSelected] = useState(null);
   const [truth, setTruth] = useState(null);
   const [truthLoading, setTruthLoading] = useState(false);
@@ -72,6 +85,30 @@ export default function AccountTruth() {
   }, [accounts, search]);
 
   const filtered = useMemo(() => filterByTier(searchFiltered, tierFilter), [searchFiltered, tierFilter]);
+
+  // Sortable columns (Sep 2026, Aaron: "make the columns sortable on the
+  // product hub account truth table") — same click-header-to-sort
+  // convention as every other account table in this app.
+  const [sort, setSort] = useState({ column: null, direction: 'asc' });
+  function toggleSort(column) {
+    setSort((prev) => (prev.column === column
+      ? { column, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      : { column, direction: 'asc' }));
+  }
+  const sorted = useMemo(() => {
+    if (!sort.column) return filtered;
+    const { column, direction } = sort;
+    const dir = direction === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const av = a[column];
+      const bv = b[column];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv) * dir;
+      return (av - bv) * dir;
+    });
+  }, [filtered, sort]);
 
   // Starting a new search should clear whatever account was previously
   // selected below — otherwise that account's full detail card (tags,
@@ -349,12 +386,12 @@ export default function AccountTruth() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
           <div>
-            <button className="secondary" onClick={refreshDashboard} disabled={accountsLoading} style={{ marginRight: 8 }}>
+            <button className="btn btn-secondary btn-sm" onClick={refreshDashboard} disabled={accountsLoading} style={{ marginRight: 8 }}>
               {accountsLoading ? 'Refreshing…' : 'Refresh'}
             </button>
             {lastRefreshedAt && <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Last refreshed {formatTimestamp(lastRefreshedAt)}</span>}
           </div>
-          <button className="secondary" onClick={() => setShowUtilities((v) => !v)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowUtilities((v) => !v)}>
             {showUtilities ? 'Hide Utilities' : 'Utilities'}
           </button>
         </div>
@@ -368,8 +405,8 @@ export default function AccountTruth() {
               {alisAdminIdsUpdatedAt && <> Last imported {formatTimestamp(alisAdminIdsUpdatedAt)}.</>}
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button className="secondary" onClick={handleDownloadTemplate}>📋 Download Template</button>
-              <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
+              <button className="btn btn-secondary btn-sm" onClick={handleDownloadTemplate}>📋 Download Template</button>
+              <label className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
                 {importingIds ? 'Importing…' : '📤 Upload Completed Template'}
                 <input type="file" accept=".xlsx" onChange={handleUploadTemplate} disabled={importingIds} style={{ display: 'none' }} />
               </label>
@@ -378,7 +415,7 @@ export default function AccountTruth() {
             {importError && <div className="notice danger">{importError}</div>}
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
-              <button className="secondary" onClick={handleDiscover} disabled={discovering}>
+              <button className="btn btn-secondary btn-sm" onClick={handleDiscover} disabled={discovering}>
                 {discovering ? '🔍 Scraping ALIS admin…' : '🔍 Discover ALIS Admin Company IDs'}
               </button>
               <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
@@ -462,8 +499,8 @@ export default function AccountTruth() {
               {companyHostsUpdatedAt && <> Last imported {formatTimestamp(companyHostsUpdatedAt)}.</>}
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button className="secondary" onClick={handleDownloadHostTemplate}>📋 Download Template</button>
-              <label className="secondary" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
+              <button className="btn btn-secondary btn-sm" onClick={handleDownloadHostTemplate}>📋 Download Template</button>
+              <label className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '6px 12px', border: '1px solid var(--line)', borderRadius: 6 }}>
                 {importingHosts ? 'Importing…' : '📤 Upload Completed Template'}
                 <input type="file" accept=".xlsx" onChange={handleUploadHostTemplate} disabled={importingHosts} style={{ display: 'none' }} />
               </label>
@@ -489,28 +526,28 @@ export default function AccountTruth() {
         <table>
           <thead>
             <tr>
-              <th>Account</th>
-              <th>Tier</th>
-              <th>ARR</th>
-              <th title="Open Enhancement Request tickets for this account">Open Enh.</th>
-              <th title="Closed Enhancement Request tickets for this account, last ~13 months">Closed Enh.</th>
+              <SortableHeader label="Account" column="name" sort={sort} onSort={toggleSort} />
+              <SortableHeader label="Tier" column="tier" sort={sort} onSort={toggleSort} />
+              <SortableHeader label="ARR" column="arrCents" sort={sort} onSort={toggleSort} />
+              <SortableHeader label="Open Enh." column="openEnhancementCount" sort={sort} onSort={toggleSort} title="Open Enhancement Request tickets for this account" />
+              <SortableHeader label="Closed Enh." column="closedEnhancementCount" sort={sort} onSort={toggleSort} title="Closed Enhancement Request tickets for this account, last ~13 months" />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.slice(0, 25).map((a) => (
+            {sorted.slice(0, 25).map((a) => (
               <tr key={a.id}>
                 <td>{a.name}</td>
                 <td>{a.tier ?? '—'}</td>
                 <td>{formatCents(a.arrCents)}</td>
                 <td>{a.openEnhancementCount ?? 0}</td>
                 <td>{a.closedEnhancementCount ?? 0}</td>
-                <td><button className="secondary" onClick={() => selectAccount(a)}>View contract truth</button></td>
+                <td><button className="btn btn-secondary btn-sm" onClick={() => selectAccount(a)}>View contract truth</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filtered.length > 25 && <p style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>Showing 25 of {filtered.length} — narrow your search.</p>}
+        {sorted.length > 25 && <p style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>Showing 25 of {sorted.length} — narrow your search.</p>}
       </div>
 
       {selected && (
@@ -518,10 +555,10 @@ export default function AccountTruth() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
             <h3 style={{ marginTop: 0 }}>{selected.name}</h3>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="secondary" onClick={handleExportTruthExcel} disabled={exportingTruthExcel}>
+              <button className="btn btn-secondary btn-sm" onClick={handleExportTruthExcel} disabled={exportingTruthExcel}>
                 {exportingTruthExcel ? 'Exporting…' : '⬇ Export to Excel'}
               </button>
-              <button className="secondary" onClick={handleExportTruthPdf} disabled={exportingTruthPdf}>
+              <button className="btn btn-secondary btn-sm" onClick={handleExportTruthPdf} disabled={exportingTruthPdf}>
                 {exportingTruthPdf ? 'Exporting…' : '⬇ Export to PDF'}
               </button>
             </div>
@@ -557,8 +594,8 @@ export default function AccountTruth() {
               <p style={{ margin: 0, color: 'var(--ink-soft)' }}>
                 ALIS Subdomain: <strong>{selected.companyHost}</strong>{' '}
                 <a href={`https://${selected.companyHost.split(',')[0].trim()}.alisonline.com`} target="_blank" rel="noreferrer">open →</a>{' '}
-                <button className="secondary" style={{ fontSize: 11 }} onClick={() => setEditingHost(true)}>Edit</button>{' '}
-                <button className="secondary" style={{ fontSize: 11 }} onClick={handleClearHost} disabled={savingHost}>Clear</button>
+                <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={() => setEditingHost(true)}>Edit</button>{' '}
+                <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} onClick={handleClearHost} disabled={savingHost}>Clear</button>
               </p>
             ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -573,7 +610,7 @@ export default function AccountTruth() {
                   {savingHost ? 'Saving…' : 'Save'}
                 </button>
                 {selected.companyHost && (
-                  <button className="secondary" style={{ fontSize: 12.5 }} onClick={() => { setEditingHost(false); setHostInput(selected.companyHost); }}>Cancel</button>
+                  <button className="btn btn-secondary btn-sm" style={{ fontSize: 12.5 }} onClick={() => { setEditingHost(false); setHostInput(selected.companyHost); }}>Cancel</button>
                 )}
               </div>
             )}
@@ -585,8 +622,8 @@ export default function AccountTruth() {
             {!editingAlisId && selected.alisAdminCompanyId ? (
               <p style={{ fontSize: 12.5, margin: '0 0 8px' }}>
                 ALIS Admin Company ID: <strong>{selected.alisAdminCompanyId}</strong>{' '}
-                <button className="secondary" style={{ fontSize: 12 }} onClick={() => setEditingAlisId(true)}>Edit</button>{' '}
-                <button className="secondary" style={{ fontSize: 12 }} onClick={handleClearAlisId} disabled={savingAlisId}>Clear</button>
+                <button className="btn btn-secondary btn-sm" style={{ fontSize: 12 }} onClick={() => setEditingAlisId(true)}>Edit</button>{' '}
+                <button className="btn btn-secondary btn-sm" style={{ fontSize: 12 }} onClick={handleClearAlisId} disabled={savingAlisId}>Clear</button>
               </p>
             ) : (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
@@ -600,7 +637,7 @@ export default function AccountTruth() {
                   {savingAlisId ? 'Saving…' : 'Save'}
                 </button>
                 {selected.alisAdminCompanyId && (
-                  <button className="secondary" onClick={() => { setEditingAlisId(false); setAlisIdInput(selected.alisAdminCompanyId); }}>Cancel</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setEditingAlisId(false); setAlisIdInput(selected.alisAdminCompanyId); }}>Cancel</button>
                 )}
               </div>
             )}

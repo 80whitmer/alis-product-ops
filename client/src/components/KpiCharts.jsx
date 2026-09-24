@@ -36,24 +36,47 @@ function TrendEmptyState() {
   );
 }
 
+/** Compact color-swatch key + roll-up total, shared by every by-tier bar chart (Sep 2026, Aaron: "add keys with roll up totals to most graphs where appropriate") — the x-axis already labels each bar by tier name, so this isn't load-bearing for reading the chart, but it reinforces one consistent tier-color mapping across every section on the page and answers "what's the portfolio total" without having to add up five bars by eye. */
+function TierKey({ data, formatValue }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  return (
+    <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mb-3">
+      <span className="text-sm text-neutral-600">
+        Total: <span className="font-semibold text-neutral-800">{formatValue(total)}</span>
+      </span>
+      <span className="flex items-center flex-wrap gap-x-3 gap-y-1">
+        {data.filter((d) => d.value > 0).map((d) => (
+          <span key={d.tier} className="flex items-center gap-1 text-xs text-neutral-500">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: TIER_COLOR[d.tier] || '#737373' }} />
+            {d.tier}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function TierBarChart({ current, metricKey, formatValue, name }) {
   const data = TIER_ORDER.map((tier) => ({ tier, value: current?.byTier?.[tier]?.[metricKey] ?? 0 }));
   if (data.every((d) => d.value === 0)) {
     return <p className="text-sm text-neutral-500 italic">Nothing to break down yet.</p>;
   }
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      <BarChart data={data} margin={{ top: 24, right: 16, left: 8, bottom: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="tier" tick={{ fontSize: 13 }} />
-        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} tickFormatter={formatValue} width={70} />
-        <Tooltip formatter={(v) => formatValue(v)} />
-        <Bar dataKey="value" name={name} radius={[4, 4, 0, 0]}>
-          {data.map((d, i) => <Cell key={i} fill={TIER_COLOR[d.tier] || '#737373'} />)}
-          <LabelList dataKey="value" position="top" formatter={formatValue} style={{ fontSize: 12, fontWeight: 600, fill: '#1e293b' }} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <>
+      <TierKey data={data} formatValue={formatValue} />
+      <ResponsiveContainer width="100%" height={260}>
+        <BarChart data={data} margin={{ top: 24, right: 16, left: 8, bottom: 8 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="tier" tick={{ fontSize: 13 }} />
+          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} tickFormatter={formatValue} width={70} />
+          <Tooltip formatter={(v) => formatValue(v)} />
+          <Bar dataKey="value" name={name} radius={[4, 4, 0, 0]}>
+            {data.map((d, i) => <Cell key={i} fill={TIER_COLOR[d.tier] || '#737373'} />)}
+            <LabelList dataKey="value" position="top" formatter={formatValue} style={{ fontSize: 12, fontWeight: 600, fill: '#1e293b' }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }
 
@@ -135,6 +158,10 @@ export function ArrBandSection({ current, arrBandHistory }) {
         {data.every((d) => d.companyCount === 0) ? (
           <p className="text-sm text-neutral-500 italic">Nothing to break down yet.</p>
         ) : (
+          <>
+          <p className="text-sm text-neutral-600 mb-3">
+            Total: <span className="font-semibold text-neutral-800">{count(data.reduce((sum, d) => sum + (d.companyCount || 0), 0))}</span> compan{data.reduce((sum, d) => sum + (d.companyCount || 0), 0) === 1 ? 'y' : 'ies'}
+          </p>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={data} margin={{ top: 24, right: 16, left: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -149,6 +176,7 @@ export function ArrBandSection({ current, arrBandHistory }) {
               ))}
             </BarChart>
           </ResponsiveContainer>
+          </>
         )}
       </div>
       <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">Trend</h4>

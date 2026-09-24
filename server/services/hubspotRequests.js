@@ -46,6 +46,11 @@ const EXCLUDED_CATEGORY = 'ALIS Internal';
 // of two independent Top-3 signals (the other is the `top_3` tag property);
 // a ticket carrying either counts.
 const TOP_3_STATUS_LABEL = 'Top 3 Enhancements';
+// Same as alis-hub's LONG_TERM_STATUS_LABEL — a ticket staged here (and not
+// also Top 3) is the other half of alis-hub's narrower "staged" Enhancement
+// Requests headline figure (Sep 2026, Aaron: "why does the AM dashboard
+// capture 157 Enhancement requests AND the Product hub Dashboard has 560").
+const LONG_TERM_STATUS_LABEL = 'Long-Term Projects';
 
 const TICKET_PROPERTIES = [
   'subject', 'hs_pipeline', 'hs_pipeline_stage', 'category_2_0', 'hs_ticket_category',
@@ -84,14 +89,33 @@ function daysBetween(fromIso, toDate) {
   return Math.round((toDate.getTime() - new Date(fromIso).getTime()) / 86400000);
 }
 
-/** Every ticket touched in the last `lookbackDays` — a bounded proxy for "not ancient/irrelevant" that doesn't require knowing every pipeline's closed-stage IDs up front. Closing a ticket touches hs_lastmodifieddate, so any ticket closed within the window is captured even if it's old; a long-open, long-untouched ticket can still fall outside it, same tradeoff the original v1 export accepted. */
+/**
+ * Every ticket touched in the last `lookbackDays`, PLUS every ticket that's
+ * still open regardless of age. Originally just the modified-date window
+ * (a bounded proxy for "not ancient/irrelevant" that doesn't require
+ * knowing every pipeline's closed-stage IDs up front) — but a long-open,
+ * long-untouched ticket falls outside that window while still being a real
+ * open Enhancement Request, and alis-hub's own per-company pull has no
+ * such window at all. Confirmed live (Sep 2026, Aaron: "we are super close
+ * on the enhancement call out... Team AM... 157, but on the product hub
+ * side it is reading 147"): the entire 10-ticket gap was in the Long-Term
+ * Projects bucket specifically — exactly the kind of deprioritized,
+ * rarely-touched backlog ticket this window used to silently drop.
+ * `closed_date` NOT_HAS_PROPERTY is HubSpot's own "still open" signal (same
+ * property this file's own `isOpen` already keys off of), OR'd with the
+ * existing window so closed-ticket history for the trend/heatmap charts is
+ * unaffected — closed tickets still need the window, only open ones don't.
+ */
 async function searchRecentTickets(lookbackDays) {
   const sinceIso = new Date(Date.now() - lookbackDays * 86400000).toISOString();
   const tickets = [];
   let after;
   do {
     const { status, body } = await hubspotRequest('POST', '/crm/v3/objects/tickets/search', {
-      filterGroups: [{ filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: sinceIso }] }],
+      filterGroups: [
+        { filters: [{ propertyName: 'closed_date', operator: 'NOT_HAS_PROPERTY' }] },
+        { filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: sinceIso }] },
+      ],
       properties: TICKET_PROPERTIES,
       sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
       limit: 100,
@@ -156,8 +180,26 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
         pinnedNote: null,
         pinnedNoteSegments: null,
         isEscalation: category === 'ALIS Escalation',
-        isEnhancementRequest: category === 'Enhancement' || FEATURE_REQUEST_PATTERN.test(p.hs_ticket_category || '') || /enhancement/i.test(p.subject || ''),
+        // Sep 2026, Aaron: "why does the AM dashboard capture 157
+        // Enhancement requests AND the Product hub Dashboard has 560" —
+        // this used to also OR in a raw hs_ticket_category FEATURE_REQUEST
+        // match regardless of category_2_0, so a ticket whose account
+        // manager had explicitly set category_2_0 to something else
+        // entirely (Billing, ALIS Bug, ...) could still get counted here
+        // off a stale/secondary hs_ticket_category value. `category` above
+        // already resolves hs_ticket_category as a FALLBACK only when
+        // category_2_0 is blank (see resolveCategory) — matching alis-hub's
+        // own isEnhancementRequest exactly (`t.category === 'Enhancement'
+        // || /enhancement/i.test(t.subject)`) means whichever category
+        // field actually won for this ticket is respected once, not
+        // second-guessed by the raw hs_ticket_category here too.
+        isEnhancementRequest: category === 'Enhancement' || /enhancement/i.test(p.subject || ''),
         isTopThree: (p.top_3 != null && p.top_3 !== '') || label?.stage === TOP_3_STATUS_LABEL,
+        // alis-hub's narrower "staged" bucket (its isLesserEnhancement) —
+        // whether Top 3 wins out over this for display purposes is decided
+        // by the consumer (Dashboard.jsx), same as alis-hub keeping the two
+        // as separate functions rather than baking the exclusion in here.
+        isLongTermEnhancement: label?.stage === LONG_TERM_STATUS_LABEL,
         isOpen,
         pipeline: label?.pipeline || p.hs_pipeline,
         stage: label?.stage || p.hs_pipeline_stage,
@@ -173,6 +215,12 @@ async function getTicketHistory({ lookbackDays = 400, companiesById = new Map() 
         tier: company?.tier ?? null,
         totalCapacity: company?.totalCapacity ?? null,
         accountManagerName: company?.accountManagerName ?? null,
+        // Sep 2026, Aaron: "put the important links beside company name
+        // throughout the app and reports" — company already carries these
+        // (export.js's withAlisMappings runs before getTicketHistory is
+        // called), just not previously threaded onto the ticket row itself.
+        companyHost: company?.companyHost ?? null,
+        alisAdminCompanyId: company?.alisAdminCompanyId ?? null,
         url: hubspotRecordUrl('ticket', t.id),
       };
     })

@@ -24,6 +24,7 @@ function flattenKeyContacts(companies) {
         companyId: c.id,
         companyName: c.name,
         tier: c.tier,
+        companyHost: c.companyHost,
       });
     }
   }

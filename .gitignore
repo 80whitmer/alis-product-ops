@@ -1,4 +1,5 @@
 node_modules/
 server/.env
 server/db/*.sqlite
+server/db/export-cache.json
 .DS_Store
