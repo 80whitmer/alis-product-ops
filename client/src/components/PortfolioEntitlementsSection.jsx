@@ -79,7 +79,20 @@ function AuditFreshness({ companies, freshness }) {
   );
 }
 
-function StatusBanner({ job }) {
+// The job's `finishedAt` lives only in the server's in-memory state (see
+// portfolioEntitlementsJob.js's doc comment — no DB-backed job queue), so
+// it reads back null after any server restart even though the actual
+// scraped data survives fine (Sep 2026, Aaron: "Can we add a last run
+// date here?" — this was blank because of exactly that restart gap).
+// Falls back to the most recent `lastCheckedAt` across the persisted
+// freshness rows, which is real, DB-backed data.
+function lastRunDate(job, rollup) {
+  if (job.finishedAt) return job.finishedAt;
+  const dates = (rollup?.freshness || []).map((f) => f.lastCheckedAt).filter(Boolean);
+  return dates.length > 0 ? dates.sort().at(-1) : null;
+}
+
+function StatusBanner({ job, rollup }) {
   if (job.status === 'idle' && job.snapshotCompanyCount === 0) {
     return <p className="text-sm text-neutral-500 italic">No portfolio entitlement check has been run yet.</p>;
   }
@@ -94,10 +107,11 @@ function StatusBanner({ job }) {
       </div>
     );
   }
+  const finishedAt = lastRunDate(job, rollup);
   return (
     <p className="text-sm text-neutral-500 mb-3">
       Last run covered {job.snapshotCompanyCount} account{job.snapshotCompanyCount === 1 ? '' : 's'}
-      {job.finishedAt ? ` — finished ${new Date(job.finishedAt).toLocaleString()}` : ''}.
+      {finishedAt ? ` — as of ${new Date(finishedAt).toLocaleString()}` : ''}.
       {job.errors.length > 0 && ` ${job.errors.length} account(s) failed.`}
     </p>
   );
@@ -255,7 +269,7 @@ export default function PortfolioEntitlementsSection({ companies, alisAdminIdCou
         {running ? 'Running…' : starting ? 'Starting…' : 'Run Portfolio Entitlement Check'}
       </button>
       {error && <div className="notice danger mb-3">{error}</div>}
-      {job && <StatusBanner job={job} />}
+      {job && <StatusBanner job={job} rollup={rollup} />}
       <LiveLog lines={logLines} />
       {rollup && <AuditFreshness companies={companies} freshness={rollup.freshness} />}
       {rollup && rollup.categories.length > 0 && (
